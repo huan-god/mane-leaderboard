@@ -6,6 +6,10 @@
 .submission-status.status-rejected{color:#ffb1ad}
 .submission-reason,.review-contact{margin:.7rem 0 0;overflow-wrap:anywhere;white-space:pre-wrap}
 .submission-reason{border-inline-start:2px solid var(--gold2);padding-inline-start:.65rem}
+.rejection-form{margin-top:.85rem;padding:.85rem;border:1px solid var(--line);border-inline-start:2px solid #d8847f}
+.rejection-form .field{margin:0}
+.rejection-error{margin:.55rem 0;color:#ffb1ad}
+.rejection-error:empty{display:none}
 .topnav{flex-wrap:wrap}
 
 .moderation-filter{display:grid;grid-template-columns:1.1fr 1.25fr .85fr auto;gap:.65rem;align-items:end;margin:0 0 1rem}

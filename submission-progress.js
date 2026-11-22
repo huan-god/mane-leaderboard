@@ -20,15 +20,66 @@ export function adminContact(related) {
   return contact ? `<p class="review-contact">联系方式：${escapeHtml(contact)}</p>` : '';
 }
 
-export function askRejectionReason(notify) {
-  const value = window.prompt('请填写拒绝理由（2–200 字），投稿者可在「我的投稿」中查看。');
-  if (value === null) return null;
-  const reason = value.trim();
-  if (reason.length < 2 || reason.length > 200) {
-    notify('拒绝理由需要 2–200 个字符。');
-    return null;
+export function showRejectionForm(button, save) {
+  const actions = button.closest('.review-actions');
+  const existing = actions.parentElement.querySelector('.rejection-form');
+  if (existing) {
+    existing.elements.namedItem('reason').focus();
+    return;
   }
-  return reason;
+
+  const form = document.createElement('form');
+  form.className = 'rejection-form';
+  form.noValidate = true;
+  form.setAttribute('aria-label','拒绝成绩');
+  form.innerHTML = `<label class="field">拒绝理由
+    <textarea name="reason" rows="3" maxlength="200" required placeholder="请填写 2–200 字"></textarea>
+    <span class="field-hint">投稿者可以在「我的投稿」查看这条理由。</span>
+  </label><p class="rejection-error" role="alert"></p>
+  <div class="form-actions"><button type="button" class="outline-button">取消</button>
+    <button type="submit" class="reject">确认拒绝</button></div>`;
+  const input = form.elements.namedItem('reason');
+  const cancel = form.querySelector('button[type="button"]');
+  const confirm = form.querySelector('button[type="submit"]');
+  const error = form.querySelector('[role="alert"]');
+
+  function dismiss() {
+    form.remove();
+    if (button.isConnected) button.focus();
+  }
+  cancel.addEventListener('click', dismiss);
+  form.addEventListener('keydown', event => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (!confirm.disabled) dismiss();
+  });
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (confirm.disabled) return;
+    const reason = input.value.trim();
+    const length = Array.from(reason).length;
+    if (length < 2 || length > 200) {
+      error.textContent = '拒绝理由需要 2–200 个字符。';
+      input.focus();
+      return;
+    }
+    error.textContent = '';
+    confirm.disabled = cancel.disabled = input.disabled = true;
+    confirm.textContent = '正在提交…';
+    try {
+      await save(reason);
+      form.remove();
+    } catch (failure) {
+      error.textContent = failure.message || '提交失败，请重试。';
+      confirm.disabled = cancel.disabled = input.disabled = false;
+      confirm.textContent = '确认拒绝';
+      input.focus();
+    }
+  });
+  actions.after(form);
+  input.focus();
 }
 
 export function mountSubmissionProgress(host, {client, ownerId, table, columns, describe}) {

@@ -1,7 +1,7 @@
 import {
-  adminContact, askRejectionReason, contactField, mountSubmissionProgress,
+  adminContact, showRejectionForm, contactField, mountSubmissionProgress,
   bindModerationFilters, filterModerationRows, moderationFilterFields, moderationPager, moderationPageSize
-} from './submission-progress.js?v=1';
+} from './submission-progress.js?v=rejection-2';
 
 const $ = selector => document.querySelector(selector);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char =>
@@ -276,7 +276,7 @@ async function openAdmin(status='pending') {
 async function updateEntry(id, revision, patch) {
   const updated=await checked(sb.from('mane_entries').update(patch).eq('id',id).eq('updated_at',revision).select('id'));
   if(!updated.length)throw Error('成绩已被其他管理员更新，请重新打开。');
-  await loadBoard();
+  if(patch.status!=='rejected')await loadBoard();
 }
 async function showProof(id, container) {
   const row=await checked(sb.from('mane_entries').select('evidence_path').eq('id',id).single());
@@ -360,13 +360,21 @@ document.addEventListener('click',async event=>{
       await loadBoard();
       await openMaps();
     }
-    const decision={approve:'approved',reject:'rejected',remove:'removed'}[action];
+    if(action==='reject'){
+      const {entry,revision,status}=button.closest('.review-card').dataset;
+      showRejectionForm(button,async reason=>{
+        await updateEntry(entry,revision,{status:'rejected',review_note:reason});
+        toast('投稿已拒绝。');
+        try{await openAdmin(status);}
+        catch{toast('投稿已拒绝。列表暂时无法读取，请重新打开后台。');}
+      });
+      return;
+    }
+    const decision={approve:'approved',remove:'removed'}[action];
     if(decision){
       const {entry,revision,status}=button.closest('.review-card').dataset;
       if(decision==='removed'&&!window.confirm('撤下这条成绩？'))return;
-      const note=decision==='rejected'?askRejectionReason(toast):null;
-      if(decision==='rejected'&&note===null)return;
-      await updateEntry(entry,revision,{status:decision,review_note:note});
+      await updateEntry(entry,revision,{status:decision,review_note:null});
       await openAdmin(status);
     }
   }catch(error){toast(error.message||'操作未完成，请重试。');}
