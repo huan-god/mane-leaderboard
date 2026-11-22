@@ -24,6 +24,7 @@ import {
   moderationPager, moderationPageSize, mountSubmissionProgress, showRejectionForm
 } from './submission-progress.js';
 import {validateLineup} from './flashback-logic.mjs';
+import {enhanceTouchLayout, onTouchLayoutChange} from './mobile.js?v=20261122-mobile';
 
 const $ = (sel) => document.querySelector(sel);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (ch) =>
@@ -2979,9 +2980,11 @@ function render() {
   writeHash();
   renderChrome();
   renderMasthead();
-  $('#workspace').innerHTML = state.mode === 'mane'
+  const workspace = $('#workspace');
+  workspace.innerHTML = state.mode === 'mane'
     ? renderManeWorkspace()
     : renderFlashbackWorkspace();
+  enhanceTouchLayout(workspace, state);
 
   if (pendingScrollRecordId) {
     const target = document.querySelector(`[data-record-row="${CSS.escape(pendingScrollRecordId)}"]`);
@@ -3616,4 +3619,5 @@ async function bootstrap() {
   }
 }
 
+onTouchLayoutChange(render);
 bootstrap();
