@@ -3,15 +3,16 @@ const touchCards = window.matchMedia?.('(max-width: 680px) and (hover: none) and
 const filtersOpen = new Map();
 
 export function onTouchLayoutChange(render) {
-  touchSidebar?.addEventListener('change', render);
-  touchCards?.addEventListener('change', render);
+  touchSidebar?.addEventListener?.('change', render);
+  touchCards?.addEventListener?.('change', render);
 }
 
 function enhanceSidebar(workspace, mode) {
-  const sidebar = workspace.querySelector('.sidebar-panel:has(.dossier-list)');
+  const sidebar = workspace.querySelector('.sidebar-panel');
+  const track = sidebar?.querySelector('.dossier-list');
   const filters = sidebar?.querySelector('.lineup-filter-box');
   const groups = sidebar?.querySelector('.segmented-toggle');
-  if (!filters || !groups) return;
+  if (!track || !filters || !groups) return;
 
   sidebar.classList.add('mobile-dossier-sidebar');
   filters.id = 'mobile-lineup-filters';
@@ -42,7 +43,6 @@ function enhanceSidebar(workspace, mode) {
     setOpen(open);
   });
 
-  const track = sidebar.querySelector('.dossier-list');
   const selected = track.querySelector('.dossier-item.active');
   if (selected) {
     const listBox = track.getBoundingClientRect();

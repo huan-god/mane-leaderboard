@@ -24,7 +24,7 @@ import {
   moderationPager, moderationPageSize, mountSubmissionProgress, showRejectionForm
 } from './submission-progress.js';
 import {validateLineup} from './flashback-logic.mjs';
-import {enhanceTouchLayout, onTouchLayoutChange} from './mobile.js?v=20261122-mobile';
+import {enhanceTouchLayout, onTouchLayoutChange} from './mobile.js?v=20261122-mobile2';
 
 const $ = (sel) => document.querySelector(sel);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (ch) =>
