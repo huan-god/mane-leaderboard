@@ -36,8 +36,8 @@ export function showRejectionForm(button, save) {
     <textarea name="reason" rows="3" maxlength="200" required placeholder="请填写 2–200 字"></textarea>
     <span class="field-hint">投稿者可以在「我的投稿」查看这条理由。</span>
   </label><p class="rejection-error" role="alert"></p>
-  <div class="form-actions"><button type="button" class="outline-button">取消</button>
-    <button type="submit" class="reject">确认拒绝</button></div>`;
+  <div class="form-actions"><button type="button" class="outline-btn">取消</button>
+    <button type="submit" class="danger-btn">确认拒绝</button></div>`;
   const input = form.elements.namedItem('reason');
   const cancel = form.querySelector('button[type="button"]');
   const confirm = form.querySelector('button[type="submit"]');
@@ -87,14 +87,14 @@ export function mountSubmissionProgress(host, {client, ownerId, table, columns, 
     <p class="section-subtitle">查看当前投稿身份的审核进度。使用昵称投稿后，请在原浏览器查看。</p>
     </div></div>`;
   if (!client || !ownerId) {
-    host.insertAdjacentHTML('beforeend', '<div class="empty"><h3>当前没有可查询的投稿</h3><p>提交成绩后，可以回到这里查看审核结果。</p></div>');
+    host.insertAdjacentHTML('beforeend', '<div class="empty-state"><h3>当前没有可查询的投稿</h3><p>提交成绩后，可以回到这里查看审核结果。</p></div>');
     return;
   }
 
   host.insertAdjacentHTML('beforeend', `<div class="moderation-tabs" role="group" aria-label="筛选审核状态">
     ${Object.entries(labels).slice(0,4).map(([key,label]) =>
-      `<button class="outline-button" type="button" data-status-filter="${key}" aria-pressed="false">${label}</button>`).join('')}
-    <button class="text-button" type="button" data-progress-refresh>刷新 ↻</button>
+      `<button class="outline-btn" type="button" data-status-filter="${key}" aria-pressed="false">${label}</button>`).join('')}
+    <button class="text-link-btn" type="button" data-progress-refresh>刷新 ↻</button>
   </div><div data-progress-list aria-live="polite"></div>`);
   let status = 'all';
   let page = 0;
@@ -131,11 +131,11 @@ export function mountSubmissionProgress(host, {client, ownerId, table, columns, 
         return `<article class="review-card"><div class="review-top">
           <strong>${escapeHtml(details.title)}</strong><span class="submission-status status-${escapeHtml(row.status)}">${escapeHtml(labels[row.status])}</span></div>
           <div class="review-meta">${escapeHtml(details.summary)}<br>配队 · ${escapeHtml(row.team.join('、'))}<br>投稿于 ${escapeHtml(submittedAt.format(new Date(row.created_at)))}</div>${note}</article>`;
-      }).join('') || '<div class="empty"><h3>暂无此状态的投稿</h3></div>';
+      }).join('') || '<div class="empty-state"><h3>暂无此状态的投稿</h3></div>';
       if (page > 0 || data.length > pageSize) {
         list.insertAdjacentHTML('beforeend', `<div class="form-actions">
-          <button class="outline-button" type="button" data-progress-page="-1" ${page===0?'disabled':''}>上一页</button>
-          <button class="outline-button" type="button" data-progress-page="1" ${data.length<=pageSize?'disabled':''}>下一页</button></div>`);
+          <button class="outline-btn" type="button" data-progress-page="-1" ${page===0?'disabled':''}>上一页</button>
+          <button class="outline-btn" type="button" data-progress-page="1" ${data.length<=pageSize?'disabled':''}>下一页</button></div>`);
       }
     } catch {
       if (host.isConnected && current === request) list.textContent = '审核进度暂时无法读取，请点击刷新重试。';
@@ -173,8 +173,8 @@ export function moderationFilterFields(filters, locationLabel, groups) {
       <select id="moderationDivision" name="division"><option value="">全部塑造</option>
         ${options([['zero','全0塑造'],['max','全满塑造']],filters.division)}
       </select></div>
-    <div class="moderation-filter-actions"><button type="submit" class="outline-button">搜索</button>
-      <button type="button" class="text-button" data-moderation-reset>清空</button></div>
+    <div class="moderation-filter-actions"><button type="submit" class="outline-btn">搜索</button>
+      <button type="button" class="text-link-btn" data-moderation-reset>清空</button></div>
   </form>`;
 }
 
@@ -212,8 +212,8 @@ export function filterModerationRows(query, filters, locationKey, divisionKey) {
 export function moderationPager(page, hasMore) {
   if (page===0 && !hasMore) return '';
   return `<div class="form-actions moderation-pagination">
-    <button type="button" class="outline-button" data-moderation-page="-1" ${page===0?'disabled':''}>上一页</button>
+    <button type="button" class="outline-btn" data-moderation-page="-1" ${page===0?'disabled':''}>上一页</button>
     <span>第 ${page+1} 页</span>
-    <button type="button" class="outline-button" data-moderation-page="1" ${hasMore?'':'disabled'}>下一页</button>
+    <button type="button" class="outline-btn" data-moderation-page="1" ${hasMore?'':'disabled'}>下一页</button>
   </div>`;
 }

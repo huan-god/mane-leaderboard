@@ -1,50 +1,110 @@
 <!doctype html>
 <html lang="zh-CN">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#151e1d">
-  <meta name="description" content="重返未来：1999 鬃毛邮报玩家排行榜。按鉴藏者特版和复刻旧图分别查询调查积分。">
-  <title>鬃毛邮报 · 调查积分榜</title>
-  <link rel="stylesheet" href="styles.css?v=2">
-  <link rel="stylesheet" href="submission-progress.css?v=rejection-2">
-  <script src="config.js"></script>
-  <script type="module" src="app.js?v=rejection-2"></script>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#161210" />
+  <meta name="description" content="重返未来：1999 非官方玩家榜单总署——融合「鬃毛邮报」调查积分榜与「焦点闪回」最短回合纪录，完整兼容社区投稿与审核体系。" />
+  <title>重返未来：1999 · 鬃毛邮报 &amp; 焦点闪回 玩家榜单</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500;1,600&family=Noto+Serif+SC:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./styles.css?v=20261122-unified" />
+  <script src="./config.js"></script>
+  <script type="module" src="./app.js?v=20261122-unified"></script>
 </head>
-<body>
-  <header class="topbar" id="home">
-    <a class="brand" href="#home"><span class="brand-seal" aria-hidden="true">邮</span><span><strong>鬃毛邮报</strong><small>MANE’S BULLETIN</small></span></a>
-    <nav class="topnav" aria-label="主要导航">
-      <button class="nav-link active" data-page="scores">调查积分榜</button>
-      <button class="nav-link" data-page="totals">主 C 总分榜</button>
-      <button class="nav-link" data-page="submissions">我的投稿</button>
-    </nav>
-    <div class="top-actions">
-      <button class="ghost-button" id="account">管理员登录</button>
-      <button class="gold-button small" id="submitScore" disabled>投稿成绩</button>
+<body data-mode="mane">
+  <!-- 实机老报纸网点与纸纤维暗角底纹（参考 game-mane-survey.png / game-mane-atlantis.png） -->
+  <div class="arch-backdrop" aria-hidden="true"></div>
+  <div class="halftone-layer" aria-hidden="true"></div>
+  <div class="paper-grain" aria-hidden="true"></div>
+
+  <header class="topbar" id="top">
+    <div class="topbar-inner">
+      <a class="brand" href="#mane/scores" data-switch-mode="mane" aria-label="返回榜单首页">
+        <span class="brand-seal" aria-hidden="true">
+          <span class="seal-ring"></span>
+          <span class="seal-glyph" id="brandGlyph">邮</span>
+        </span>
+        <span class="brand-copy">
+          <strong id="brandTitle">鬃毛邮报 · 调查总榜</strong>
+          <small>REVERSE: 1999 · COMMUNITY ARCHIVE</small>
+        </span>
+      </a>
+
+      <!-- 官方细铜框双模式切换（保留 ▷▶○× 装饰角标） -->
+      <div class="mode-switcher" role="tablist" aria-label="榜单模式切换">
+        <span class="frame-glyphs left" aria-hidden="true">▷▶○×</span>
+        <button class="mode-tab active" role="tab" aria-selected="true" data-mode-switch="mane">
+          <span class="mode-cn">鬃毛邮报</span>
+          <span class="mode-en">MANE’S BULLETIN</span>
+        </button>
+        <button class="mode-tab" role="tab" aria-selected="false" data-mode-switch="flashback">
+          <span class="mode-cn">焦点闪回</span>
+          <span class="mode-en">FLASHBACK</span>
+        </button>
+        <span class="frame-glyphs right" aria-hidden="true">1999</span>
+      </div>
+
+      <div class="top-actions">
+        <span id="connectionBadge" class="status-pill" aria-live="polite">
+          <span class="status-dot"></span>
+          <span id="connectionText">连接档案库…</span>
+        </span>
+        <button id="adminCenterBtn" class="ghost-btn" hidden>管理后台</button>
+        <button type="button" class="ghost-btn" data-action="my-submissions">我的投稿</button>
+        <button id="accountBtn" class="ghost-btn">管理员登录</button>
+        <button id="submitBtn" class="action-cta-btn" disabled>
+          <span class="cta-main">＋ 投稿成绩</span>
+          <span class="cta-sub" aria-hidden="true">SUBMIT ▽▽</span>
+        </button>
+      </div>
     </div>
+
+    <!-- 次级导航条 -->
+    <nav class="subnav-bar" aria-label="榜单视图导航">
+      <div class="subnav-inner" id="subnav"></div>
+    </nav>
   </header>
-  <main class="main-shell">
-    <section class="bulletin-cover" aria-labelledby="headline">
-      <div><p class="eyebrow">重返未来：1999 · 玩家调查记录</p><h1 id="headline">鬃毛邮报</h1>
-      <p>按调查对象与塑造分组查阅高分配队。</p>
-      <a class="outline-button bulletin-link" href="https://huan-god.github.io/flashback-leaderboard/">焦点闪回榜 <span aria-hidden="true">↗</span></a></div>
-      <div class="issue-details"><strong>4.1</strong><span>亚特兰蒂斯谋杀案</span><time>11/05 – 12/10</time></div>
-    </section>
-    <div id="notice" role="status"></div>
-    <section id="scores" class="content-section" aria-label="鬃毛邮报排行榜">
-      <div id="filters"></div>
-      <div id="board"></div>
-    </section>
+
+  <main class="shell">
+    <!-- 紧凑报头 Masthead（整合版本期次与全站统计，桌面首屏直达前三名） -->
+    <section class="masthead" id="masthead" aria-live="polite"></section>
+
+    <!-- 全局提示栏（仅在离线/报错时显示） -->
+    <div id="globalNotice" class="global-notice" role="status" hidden></div>
+
+    <!-- 核心榜单工作区 -->
+    <div id="workspace" class="workspace"></div>
   </main>
-  <footer class="footer">
-    <div><b>站长 · 幻化凌风</b> · <a class="text-button" href="https://space.bilibili.com/266889606" rel="noopener noreferrer" target="_blank">B 站主页 ↗</a>
-      <div>管理员 · 寻屿、莳雨枫椛、偶尔出现的神秘猫猫头、椋-喵、麒麟kt、omio</div></div>
-    <div><a class="text-button" href="https://res1999.huijiwiki.com/wiki/鬃毛邮报4.1" rel="noopener noreferrer" target="_blank">Wiki · 鉴藏者特版 ↗</a>
-      <a class="text-button" href="https://res1999.huijiwiki.com/wiki/鬃毛邮报" rel="noopener noreferrer" target="_blank">Wiki · 往期首领 ↗</a>
-      <p>非官方玩家社区榜。数据以审核通过的游戏结算截图为准。</p></div>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-col">
+        <div class="footer-brand">
+          <strong>REVERSE: 1999 · 民间挑战档案总署</strong>
+          <span>鬃毛邮报调查积分榜 × 焦点闪回最短回合榜</span>
+        </div>
+        <p class="footer-credits">
+          站长：幻化凌风（<a href="https://space.bilibili.com/266889606" target="_blank" rel="noopener noreferrer">哔哩哔哩主页 ↗</a>）·
+          管理员：寻屿、莳雨枫椛、偶尔出现的神秘猫猫头、椋-喵、麒麟kt、omio
+        </p>
+      </div>
+      <div class="footer-col footer-links">
+        <div class="footer-ref-links">
+          <a href="https://huan-god.github.io/mane-leaderboard/">鬃毛邮报榜 ↗</a>
+          <a href="https://huan-god.github.io/flashback-leaderboard/">焦点闪回榜 ↗</a>
+          <a href="https://res1999.huijiwiki.com/wiki/%E9%AC%83%E6%AF%9B%E9%82%AE%E6%8A%A5" target="_blank" rel="noopener noreferrer">灰机 Wiki · 鬃毛邮报 ↗</a>
+          <a href="https://res1999.huijiwiki.com/wiki/%E7%84%A6%E7%82%B9%E9%97%AA%E5%9B%9E" target="_blank" rel="noopener noreferrer">灰机 Wiki · 焦点闪回 ↗</a>
+        </div>
+        <p class="footer-disclaimer">
+          本网站为非官方玩家共建社区项目，与游戏发行方无隶属关系。请勿在成绩截图中暴露个人敏感信息。
+        </p>
+      </div>
+    </div>
   </footer>
-  <dialog id="dialog" class="modal" aria-labelledby="dialogTitle"></dialog>
+
+  <div id="modalRoot"></div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 </body>
 </html>
