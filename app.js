@@ -62,7 +62,7 @@ async function loadBoard() {
   const [maps,records,totals]=await Promise.all([
     checked(sb.from('mane_maps').select('id,name,section,edition,position,opens_at,active').eq('active',true)),
     loadPages('mane_leaderboard',['id']),
-    loadPages('mane_total_leaderboard',['section','edition','division','player_id'])
+    loadPages('mane_carry_total_leaderboard',['section','edition','division','carry_key'])
   ]);
   state.maps=maps;
   state.maps.sort((a,b)=>b.edition.localeCompare(a.edition,'zh-CN',{numeric:true})||a.position-b.position||a.name.localeCompare(b.name,'zh-CN'));
@@ -89,9 +89,7 @@ function render() {
   const maps=activeMaps();
   if (!maps.some(map=>map.id===state.mapId)) state.mapId=maps[0]?.id||'';
   const map=maps.find(item=>item.id===state.mapId);
-  const mapIds=new Set(maps.map(item=>item.id));
-  const sectionScores=state.scores.filter(record=>mapIds.has(record.map_id)&&record.division===state.division);
-  const ranked=sectionScores.filter(record=>record.map_id===state.mapId).sort(compareScore);
+  const ranked=state.scores.filter(record=>record.map_id===state.mapId&&record.division===state.division).sort(compareScore);
   const names=new Map();
   for (const row of ranked) for (const name of carries(row.carry)) names.set(carryKey(name),name);
   if(!names.has(state.carry)) state.carry='';
@@ -100,20 +98,15 @@ function render() {
   $('#filters').innerHTML=`<div class="moderation-tabs mane-sections" role="group" aria-label="调查分类">${buttons}</div>`;
   const mapOptions=maps.map(item=>[item.id,item.section==='new'?item.name:`${item.name}${item.edition===maps[0]?.edition?'':` · ${item.edition}`}`]);
   const carryOptions=[['',names.size?'全部主 C':'暂无主 C 可选'],...[...names].sort((a,b)=>a[1].localeCompare(b[1],'zh-CN'))];
-  const panel={
-    scores:()=>renderScores(map,ranked),
-    carries:()=>renderCarrySummary(sectionScores),
-    totals:()=>renderTotals(state.section==='new'?maps[0]?.edition:'')
-  };
   $('#board').innerHTML=`<div class="board-wrap">
     <aside class="filter-panel">
       ${state.page==='scores'?`<label for="mapSelect" class="filter-label">调查对象</label><select id="mapSelect" class="version-select mane-select"${map?'':' disabled'}>${options(mapOptions,state.mapId)}</select>`:''}
       <label for="divisionSelect" class="filter-label">塑造分组</label><select id="divisionSelect" class="version-select mane-select">${options(Object.entries(divisions),state.division)}</select>
       ${state.page==='scores'?`<label for="carrySelect" class="filter-label">主 C 筛选</label><select id="carrySelect" class="version-select mane-select"${names.size?'':' disabled'}>${options(carryOptions,state.carry)}</select>`:''}
-      <div class="filter-hint">${state.page==='totals'?'每位玩家每图取审核通过的最高分，再相加。':'同图、同组、同队保留最高分。积分并列时按投稿时间排。'}</div>
+      <div class="filter-hint">${state.page==='totals'?'同一主 C 每图取所有配队中审核通过的最高分，再把各图分数相加。':'同图、同组、同队保留最高分。积分并列时按投稿时间排。'}</div>
       ${state.section==='rerun'?'<p class="minor">复刻目录参考 Wiki 往期首领。可挑战地图以游戏内「怪相档案」为准。</p>':''}
     </aside>
-    ${panel[state.page]()}
+    ${state.page==='scores'?renderScores(map,ranked):renderTotals(state.section==='new'?maps[0]?.edition:'')}
   </div>`;
 }
 function renderScores(map, ranked) {
@@ -130,35 +123,17 @@ function renderScores(map, ranked) {
     `<div class="empty"><h3>${state.ready?'暂无审核通过的成绩':'正在加载成绩'}</h3>
     ${state.ready&&isOpen(map)?'<button class="gold-button" data-action="submit">投稿成绩</button>':''}</div>`}</article>`;
 }
-function renderCarrySummary(records) {
-  const groups=new Map();
-  for(const record of records) {
-    for(const name of carries(record.carry)) {
-      const key=carryKey(name);
-      const row=groups.get(key)||{name,count:0,maps:new Set()};
-      row.count++;
-      row.maps.add(record.map_id);
-      groups.set(key,row);
-    }
-  }
-  const sorted=[...groups.values()].sort((a,b)=>b.count-a.count||b.maps.size-a.maps.size||a.name.localeCompare(b.name,'zh-CN'));
-  return `<article class="board-panel"><div class="board-head"><div><h3>主 C 榜</h3>
-  <p>${sectionLabels[state.section]} · ${divisions[state.division]}</p></div></div>
-  ${sorted.length?`<div class="table-scroll"><table class="players-table"><thead><tr><th>名次</th><th>主 C</th><th>当前上榜次数</th><th>上榜地图数</th></tr></thead><tbody>
-  ${sorted.map((row,index)=>`<tr><td>${index+1}</td><td>${esc(row.name)}</td><td>${row.count}</td><td>${row.maps.size}</td></tr>`).join('')}</tbody></table></div>`:
-  '<div class="empty"><h3>暂无成绩</h3></div>'}</article>`;
-}
 function renderTotals(edition) {
   const rows=state.totals.filter(row=>row.section===state.section&&row.edition===edition&&row.division===state.division)
     .map(row=>({...row,total:BigInt(row.total_score)})).sort((a,b)=>{
       if(a.total!==b.total)return a.total>b.total?-1:1;
-      return b.map_count-a.map_count||a.display_name.localeCompare(b.display_name,'zh-CN')||a.player_id.localeCompare(b.player_id);
+      return b.map_count-a.map_count||a.carry_name.localeCompare(b.carry_name,'zh-CN')||a.carry_key.localeCompare(b.carry_key);
     });
-  return `<article class="board-panel"><div class="board-head"><div><h3>总分榜</h3>
+  return `<article class="board-panel"><div class="board-head"><div><h3>主 C 总分榜</h3>
     <p>${sectionLabels[state.section]} · ${divisions[state.division]}</p></div></div>
-    ${rows.length?`<div class="table-scroll"><table class="players-table"><thead><tr><th>名次</th><th>玩家</th><th>已计分地图</th><th>调查总分</th></tr></thead><tbody>
-    ${rows.map((row,index)=>`<tr><td>${index+1}</td><td>${esc(row.display_name)}</td><td>
-    <details><summary>${row.map_count} 张</summary><ul>${row.map_scores.map(map=>`<li>${esc(map.name)} · ${formatScore(map.score)}</li>`).join('')}</ul></details></td>
+    ${rows.length?`<div class="table-scroll"><table class="players-table"><thead><tr><th>名次</th><th>主 C</th><th>各图最高分</th><th>调查总分</th></tr></thead><tbody>
+    ${rows.map((row,index)=>`<tr><td>${index+1}</td><td>${esc(row.carry_name)}</td><td>
+    <details><summary>${row.map_count} 张</summary><ul>${row.map_scores.map(map=>`<li>${esc(map.name)} · ${formatScore(map.score)}<span class="map-meta">${esc(map.player)} · ${esc(map.team.join('、'))}</span></li>`).join('')}</ul></details></td>
     <td class="score-number">${formatScore(row.total)}</td></tr>`).join('')}</tbody></table></div>`:
     `<div class="empty"><h3>${state.ready?'暂无审核通过的成绩':'正在加载成绩'}</h3></div>`}</article>`;
 }
