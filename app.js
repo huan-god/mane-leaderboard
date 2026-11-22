@@ -2,15 +2,15 @@ const $ = selector => document.querySelector(selector);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char =>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[char]);
 const sectionLabels = {new:'本期新三图 · 鉴藏者特版',rerun:'复刻旧图 · 目击者特版'};
-const divisions = {zero:'全0塑造',mixed:'其他塑造',max:'全满塑造'};
+const divisions = {zero:'全0塑造',max:'全满塑造'};
 const statuses = {pending:'待审核',approved:'已通过',rejected:'已拒绝',removed:'已移除'};
 const mimeTypes = {'image/png':'png','image/jpeg':'jpg','image/webp':'webp'};
-const formatScore = score => Number(score).toLocaleString('zh-CN');
+const formatScore = score => BigInt(score).toLocaleString('zh-CN');
 const carryKey = text => String(text).normalize('NFKC').trim().toLowerCase();
 const dateLabel = time => new Date(time).toLocaleDateString('zh-CN',{timeZone:'Asia/Shanghai',month:'2-digit',day:'2-digit'});
 const carries = value => String(value ?? '').split(/[/／、]/).map(name=>name.trim()).filter(Boolean);
 const compareScore = (a,b) => b.score-a.score || Date.parse(a.created_at)-Date.parse(b.created_at) || a.id.localeCompare(b.id);
-const state = {page:'scores',section:'new',division:'zero',mapId:'',carry:'',maps:[],scores:[],admin:false,ready:false,session:null};
+const state = {page:'scores',section:'new',division:'zero',mapId:'',carry:'',maps:[],scores:[],totals:[],admin:false,ready:false,session:null};
 let sb;
 let toastTimer;
 
@@ -48,17 +48,26 @@ async function checked(result) {
   if (error) throw error;
   return data;
 }
-async function loadBoard() {
-  const maps=await checked(sb.from('mane_maps').select('id,name,section,edition,position,opens_at,active').eq('active',true).order('edition',{ascending:false}).order('position').order('name'));
+async function loadPages(table, keys) {
   const records=[];
   for(let from=0;;from+=500) {
-    const page=await checked(sb.from('mane_leaderboard').select('*').order('id').range(from,from+499));
+    let query=sb.from(table).select('*');
+    for(const key of keys)query=query.order(key);
+    const page=await checked(query.range(from,from+499));
     records.push(...page);
-    if(page.length<500)break;
+    if(page.length<500)return records;
   }
+}
+async function loadBoard() {
+  const [maps,records,totals]=await Promise.all([
+    checked(sb.from('mane_maps').select('id,name,section,edition,position,opens_at,active').eq('active',true)),
+    loadPages('mane_leaderboard',['id']),
+    loadPages('mane_total_leaderboard',['section','edition','division','player_id'])
+  ]);
   state.maps=maps;
   state.maps.sort((a,b)=>b.edition.localeCompare(a.edition,'zh-CN',{numeric:true})||a.position-b.position||a.name.localeCompare(b.name,'zh-CN'));
   state.scores=records;
+  state.totals=totals;
   state.ready=true;
   $('#notice').textContent='';
   render();
@@ -90,16 +99,21 @@ function render() {
     `<button class="outline-button ${key===state.section?'selected':''}" aria-pressed="${key===state.section}" data-action="section" data-value="${key}">${label}</button>`).join('');
   $('#filters').innerHTML=`<div class="moderation-tabs mane-sections" role="group" aria-label="调查分类">${buttons}</div>`;
   const mapOptions=maps.map(item=>[item.id,item.section==='new'?item.name:`${item.name}${item.edition===maps[0]?.edition?'':` · ${item.edition}`}`]);
-  const carryOptions=[['','全部主 C'],...[...names].sort((a,b)=>a[1].localeCompare(b[1],'zh-CN'))];
+  const carryOptions=[['',names.size?'全部主 C':'暂无主 C 可选'],...[...names].sort((a,b)=>a[1].localeCompare(b[1],'zh-CN'))];
+  const panel={
+    scores:()=>renderScores(map,ranked),
+    carries:()=>renderCarrySummary(sectionScores),
+    totals:()=>renderTotals(state.section==='new'?maps[0]?.edition:'')
+  };
   $('#board').innerHTML=`<div class="board-wrap">
     <aside class="filter-panel">
       ${state.page==='scores'?`<label for="mapSelect" class="filter-label">调查对象</label><select id="mapSelect" class="version-select mane-select"${map?'':' disabled'}>${options(mapOptions,state.mapId)}</select>`:''}
       <label for="divisionSelect" class="filter-label">塑造分组</label><select id="divisionSelect" class="version-select mane-select">${options(Object.entries(divisions),state.division)}</select>
       ${state.page==='scores'?`<label for="carrySelect" class="filter-label">主 C 筛选</label><select id="carrySelect" class="version-select mane-select"${names.size?'':' disabled'}>${options(carryOptions,state.carry)}</select>`:''}
-      <div class="filter-hint">调查积分从高到低排列。同图、同组、同队保留最高分，积分并列时按投稿时间排。</div>
+      <div class="filter-hint">${state.page==='totals'?'每位玩家每图取审核通过的最高分，再相加。':'同图、同组、同队保留最高分。积分并列时按投稿时间排。'}</div>
       ${state.section==='rerun'?'<p class="minor">复刻目录参考 Wiki 往期首领。可挑战地图以游戏内「怪相档案」为准。</p>':''}
     </aside>
-    ${state.page==='scores'?renderScores(map,ranked):renderSummary(sectionScores,state.page==='carries')}
+    ${panel[state.page]()}
   </div>`;
 }
 function renderScores(map, ranked) {
@@ -116,11 +130,11 @@ function renderScores(map, ranked) {
     `<div class="empty"><h3>${state.ready?'暂无审核通过的成绩':'正在加载成绩'}</h3>
     ${state.ready&&isOpen(map)?'<button class="gold-button" data-action="submit">投稿成绩</button>':''}</div>`}</article>`;
 }
-function renderSummary(records, byCarry) {
+function renderCarrySummary(records) {
   const groups=new Map();
   for(const record of records) {
-    const owners=byCarry?carries(record.carry).map(name=>[carryKey(name),name]):[[record.player_id,record.display_name]];
-    for(const [key,name] of owners) {
+    for(const name of carries(record.carry)) {
+      const key=carryKey(name);
       const row=groups.get(key)||{name,count:0,maps:new Set()};
       row.count++;
       row.maps.add(record.map_id);
@@ -128,11 +142,25 @@ function renderSummary(records, byCarry) {
     }
   }
   const sorted=[...groups.values()].sort((a,b)=>b.count-a.count||b.maps.size-a.maps.size||a.name.localeCompare(b.name,'zh-CN'));
-  return `<article class="board-panel"><div class="board-head"><div><h3>${byCarry?'主 C 榜':'玩家榜'}</h3>
+  return `<article class="board-panel"><div class="board-head"><div><h3>主 C 榜</h3>
   <p>${sectionLabels[state.section]} · ${divisions[state.division]}</p></div></div>
-  ${sorted.length?`<div class="table-scroll"><table class="players-table"><thead><tr><th>名次</th><th>${byCarry?'主 C':'玩家'}</th><th>当前上榜次数</th><th>上榜地图数</th></tr></thead><tbody>
+  ${sorted.length?`<div class="table-scroll"><table class="players-table"><thead><tr><th>名次</th><th>主 C</th><th>当前上榜次数</th><th>上榜地图数</th></tr></thead><tbody>
   ${sorted.map((row,index)=>`<tr><td>${index+1}</td><td>${esc(row.name)}</td><td>${row.count}</td><td>${row.maps.size}</td></tr>`).join('')}</tbody></table></div>`:
   '<div class="empty"><h3>暂无成绩</h3></div>'}</article>`;
+}
+function renderTotals(edition) {
+  const rows=state.totals.filter(row=>row.section===state.section&&row.edition===edition&&row.division===state.division)
+    .map(row=>({...row,total:BigInt(row.total_score)})).sort((a,b)=>{
+      if(a.total!==b.total)return a.total>b.total?-1:1;
+      return b.map_count-a.map_count||a.display_name.localeCompare(b.display_name,'zh-CN')||a.player_id.localeCompare(b.player_id);
+    });
+  return `<article class="board-panel"><div class="board-head"><div><h3>总分榜</h3>
+    <p>${sectionLabels[state.section]} · ${divisions[state.division]}</p></div></div>
+    ${rows.length?`<div class="table-scroll"><table class="players-table"><thead><tr><th>名次</th><th>玩家</th><th>已计分地图</th><th>调查总分</th></tr></thead><tbody>
+    ${rows.map((row,index)=>`<tr><td>${index+1}</td><td>${esc(row.display_name)}</td><td>
+    <details><summary>${row.map_count} 张</summary><ul>${row.map_scores.map(map=>`<li>${esc(map.name)} · ${formatScore(map.score)}</li>`).join('')}</ul></details></td>
+    <td class="score-number">${formatScore(row.total)}</td></tr>`).join('')}</tbody></table></div>`:
+    `<div class="empty"><h3>${state.ready?'暂无审核通过的成绩':'正在加载成绩'}</h3></div>`}</article>`;
 }
 function mapChoices(maps, selected) {
   return Object.entries(sectionLabels).map(([key,label])=>
@@ -164,6 +192,7 @@ function readScore(fields) {
   const scoreText=String(fields.get('score')).trim().replace(/[,，]/g,'');
   const score=Number(scoreText);
   const display_name=String(fields.get('display_name')).trim();
+  if(!Object.hasOwn(divisions,fields.get('division')))throw Error('请选择全 0 塑造或全满塑造。');
   if(display_name.length<2||display_name.length>32)throw Error('请填写 2–32 字的昵称。');
   if(team.length<1||team.length>4||teamKeys.size!==team.length||team.some(name=>name.length>40))throw Error('请填写 1–4 名不重复的上阵角色。');
   if(!names.length||new Set(names.map(carryKey)).size!==names.length||names.some(name=>!teamKeys.has(carryKey(name))))throw Error('主 C 必须包含在上阵配队中。');
