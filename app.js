@@ -1,3 +1,8 @@
+import {
+  adminContact, askRejectionReason, contactField, mountSubmissionProgress,
+  bindModerationFilters, filterModerationRows, moderationFilterFields, moderationPager, moderationPageSize
+} from './submission-progress.js?v=1';
+
 const $ = selector => document.querySelector(selector);
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char =>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[char]);
@@ -86,6 +91,19 @@ function renderSession() {
 function render() {
   renderSession();
   document.querySelectorAll('.nav-link').forEach(button=>button.classList.toggle('active',button.dataset.page===state.page));
+  if(state.page==='submissions'){
+    $('#filters').textContent='';
+    $('#board').innerHTML='<div id="submissionProgress"></div>';
+    mountSubmissionProgress($('#submissionProgress'),{
+      client:sb,ownerId:state.session?.user.id,table:'mane_entries',columns:'map_id,division,team,carry,score',
+      describe(row){
+        const map=state.maps.find(item=>item.id===row.map_id);
+        return {title:map?.name||'已隐藏地图',
+          summary:`${divisions[row.division]} · 主 C · ${row.carry} · ${formatScore(row.score)} 分`};
+      }
+    });
+    return;
+  }
   const maps=activeMaps();
   if (!maps.some(map=>map.id===state.mapId)) state.mapId=maps[0]?.id||'';
   const map=maps.find(item=>item.id===state.mapId);
@@ -158,6 +176,7 @@ function openSubmit() {
   dialog('投稿鬃毛邮报成绩',`<form id="entryForm">${scoreFields({map_id:state.mapId,division:state.division,display_name:nickname},maps)}
     <div class="field"><label for="entryProof">结算截图</label><input id="entryProof" name="proof" type="file" accept="image/png,image/jpeg,image/webp" required>
     <span class="field-hint">PNG、JPG 或 WebP，最大 5 MB。截图仅本人及管理员可见。</span></div>
+    ${contactField}
     <div class="form-actions"><button type="submit" class="gold-button">提交审核</button></div></form>`);
 }
 function readScore(fields) {
@@ -187,42 +206,72 @@ async function submit(fields) {
   const bucket=sb.storage.from('mane-proofs');
   await checked(bucket.upload(path,proof,{contentType:proof.type}));
   try {
-    await checked(sb.from('mane_entries').insert({...record,player_id,evidence_path:path}));
+    const contact=String(fields.get('contact')??'').trim();
+    await checked(sb.rpc('submit_mane_result',{p_record:{...record,evidence_path:path},p_contact:contact||null}));
   } catch(error) {
     await bucket.remove([path]);
     throw error;
   }
   try { localStorage.setItem('mane-nickname',record.display_name); } catch {}
   $('#dialog').close();
-  toast('已提交，等待管理员审核。');
+  state.session=session;
+  if(state.page==='submissions')render();
+  toast('已提交，可在「我的投稿」查看审核进度。');
 }
+const moderationFilters={tab:'',name:'',location:'',division:'',page:0};
 async function openAdmin(status='pending') {
   if (!state.admin) return;
+  if(status!==moderationFilters.tab){moderationFilters.tab=status;moderationFilters.page=0;}
   dialog('鬃毛邮报管理后台',`<div class="moderation-tabs">${Object.entries(statuses).map(([key,label])=>
     `<button class="outline-button ${key===status?'selected':''}" data-action="admin" data-value="${key}">${label}</button>`).join('')}
-    <button class="outline-button" data-action="maps">地图管理</button></div><div id="reviewList">正在读取…</div>`);
+    <button class="outline-button" data-action="maps">地图管理</button></div><div id="reviewFilters"></div><div id="reviewList">正在读取…</div>`);
   const list=$('#reviewList');
-  const rows=await checked(sb.from('mane_entries').select('id,status,display_name,map_id,division,team,carry,score,evidence_path,created_at,updated_at,related_url,review_note').eq('status',status).is('archived_at',null).order('created_at',{ascending:false}).limit(200));
+  const maps=await checked(sb.from('mane_maps').select('id,name,edition,section,active').order('edition',{ascending:false}).order('position'));
   if (!list.isConnected) return;
-  list.innerHTML=rows.map(row=>{
-    const map=state.maps.find(item=>item.id===row.map_id);
-    return `<article class="review-card">
-      <div class="review-top"><strong>${esc(row.display_name)}</strong><span class="score-number">${formatScore(row.score)}</span></div>
-      <div class="review-meta">${esc(map?.name||'已隐藏地图')} · ${divisions[row.division]}<br>主 C · ${esc(row.carry)}<br>配队 · ${esc(row.team.join('、'))}</div>
-      ${linkHtml(row.related_url)}${row.review_note?`<p class="minor">${esc(row.review_note)}</p>`:''}
-      <div class="review-actions"><button class="outline-button" data-action="proof" data-id="${row.id}">查看截图</button>
-      <button class="outline-button" data-action="edit" data-id="${row.id}">编辑成绩</button>
-      ${status==='pending'?'<button class="approve" data-action="approve">审核通过</button><button class="reject" data-action="reject">拒绝</button>':''}
-      ${status==='approved'?'<button class="reject" data-action="remove">撤下</button>':''}
-      ${status==='rejected'?'<button class="reject" data-action="delete-rejected">删除</button>':''}</div>
-      <div class="review-proof" role="status"></div></article>`;
-  }).join('')||'<p class="minor">这组暂无成绩。</p>';
-  for(const [index,card] of Array.from(list.children).entries()){
-    if(!rows[index])break;
-    card.dataset.entry=rows[index].id;
-    card.dataset.revision=rows[index].updated_at;
-    card.dataset.status=status;
+  const mapNames=new Map();
+  const groups=new Map();
+  for(const map of maps){
+    mapNames.set(map.id,map.name);
+    const label=`${map.edition} · ${map.section==='new'?'新三图':'复刻旧图'}`;
+    if(!groups.has(label))groups.set(label,[]);
+    groups.get(label).push([map.id,map.active?map.name:`${map.name}（隐藏）`]);
   }
+  $('#reviewFilters').innerHTML=moderationFilterFields(moderationFilters,'地图',[...groups]);
+  let request=0;
+  async function load(){
+    const current=++request;
+    list.textContent='正在读取投稿…';
+    try{
+      const base=sb.from('mane_entries').select('id,status,display_name,map_id,division,team,carry,score,evidence_path,created_at,updated_at,related_url,review_note,submission_contacts(contact)')
+        .eq('status',status).is('archived_at',null);
+      const result=await checked(filterModerationRows(base,moderationFilters,'map_id','division'));
+      if(!list.isConnected||current!==request)return;
+      if(!result.length&&moderationFilters.page>0){moderationFilters.page-=1;return load();}
+      const rows=result.slice(0,moderationPageSize);
+      list.innerHTML=rows.map(row=>{
+        return `<article class="review-card">
+          <div class="review-top"><strong>${esc(row.display_name)}</strong><span class="score-number">${formatScore(row.score)}</span></div>
+          <div class="review-meta">${esc(mapNames.get(row.map_id)||'已隐藏地图')} · ${divisions[row.division]}<br>主 C · ${esc(row.carry)}<br>配队 · ${esc(row.team.join('、'))}</div>
+          ${adminContact(row.submission_contacts)}
+          ${linkHtml(row.related_url)}${row.status==='rejected'?`<p class="submission-reason"><strong>拒绝理由：</strong>${esc(row.review_note||'未记录')}</p>`:row.review_note?`<p class="minor">${esc(row.review_note)}</p>`:''}
+          <div class="review-actions"><button class="outline-button" data-action="proof" data-id="${row.id}">查看截图</button>
+          <button class="outline-button" data-action="edit" data-id="${row.id}">编辑成绩</button>
+          ${status==='pending'?'<button class="approve" data-action="approve">审核通过</button><button class="reject" data-action="reject">拒绝</button>':''}
+          ${status==='approved'?'<button class="reject" data-action="remove">撤下</button>':''}
+          ${status==='rejected'?'<button class="approve" data-action="reopen-result">退回待审核</button><button class="reject" data-action="delete-rejected">删除</button>':''}</div>
+          <div class="review-proof" role="status"></div></article>`;
+      }).join('')||'<p class="minor">暂无符合条件的投稿。</p>';
+      for(const [index,card] of Array.from(list.children).entries()){
+        if(!rows[index])break;
+        card.dataset.entry=rows[index].id;
+        card.dataset.revision=rows[index].updated_at;
+        card.dataset.status=status;
+      }
+      list.insertAdjacentHTML('beforeend',moderationPager(moderationFilters.page,result.length>moderationPageSize));
+    }catch(error){if(list.isConnected&&current===request)list.textContent=`读取后台失败：${error.message}`;}
+  }
+  bindModerationFilters($('.moderation-filter'),list,moderationFilters,load);
+  await load();
 }
 async function updateEntry(id, revision, patch) {
   const updated=await checked(sb.from('mane_entries').update(patch).eq('id',id).eq('updated_at',revision).select('id'));
@@ -261,10 +310,12 @@ async function openAccount() {
   dialog('管理员登录','<form id="loginForm"><div class="field"><label for="adminEmail">已授权邮箱</label><input id="adminEmail" name="email" type="email" required></div><p class="minor">在同一浏览器打开邮件登录链接，再返回本榜。</p><div class="form-actions"><button type="submit" class="gold-button">发送登录链接</button></div></form>');
 }
 async function syncSession(session) {
+  const changed=state.session?.user.id!==session?.user.id;
   state.session=session;
   state.admin=false;
   if(session&&!session.user.is_anonymous)state.admin=Boolean(await checked(sb.rpc('is_admin')));
-  renderSession();
+  if(changed&&state.page==='submissions')render();
+  else renderSession();
 }
 
 document.addEventListener('click',async event=>{
@@ -283,6 +334,16 @@ document.addEventListener('click',async event=>{
     if (action==='maps')await openMaps();
     if (action==='edit')await openEdit(id);
     if (action==='proof')await showProof(id,button.closest('.review-card').querySelector('.review-proof'));
+    if (action==='reopen-result'&&!button.disabled){
+      const {entry,revision}=button.closest('.review-card').dataset;
+      button.disabled=true;
+      try{
+        await checked(sb.rpc('reopen_rejected_result',{p_board:'mane',p_id:entry,p_updated_at:revision}));
+        await openAdmin('pending');
+        toast('已退回待审核，可以编辑后重新审核。');
+      }finally{button.disabled=false;}
+      return;
+    }
     if (action==='delete-rejected'&&!button.disabled&&window.confirm('删除这条已拒绝的成绩？')){
       const {entry,revision}=button.closest('.review-card').dataset;
       button.disabled=true;
@@ -303,7 +364,9 @@ document.addEventListener('click',async event=>{
     if(decision){
       const {entry,revision,status}=button.closest('.review-card').dataset;
       if(decision==='removed'&&!window.confirm('撤下这条成绩？'))return;
-      await updateEntry(entry,revision,{status:decision});
+      const note=decision==='rejected'?askRejectionReason(toast):null;
+      if(decision==='rejected'&&note===null)return;
+      await updateEntry(entry,revision,{status:decision,review_note:note});
       await openAdmin(status);
     }
   }catch(error){toast(error.message||'操作未完成，请重试。');}
