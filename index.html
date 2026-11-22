@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#151e1d">
+  <meta name="description" content="重返未来：1999 鬃毛邮报玩家排行榜。按鉴藏者特版和复刻旧图分别查询调查积分。">
+  <title>鬃毛邮报 · 调查积分榜</title>
+  <link rel="stylesheet" href="styles.css?v=1">
+  <script src="config.js"></script>
+  <script type="module" src="app.js?v=1"></script>
+</head>
+<body>
+  <header class="topbar" id="home">
+    <a class="brand" href="#home"><span class="brand-seal" aria-hidden="true">邮</span><span><strong>鬃毛邮报</strong><small>MANE’S BULLETIN</small></span></a>
+    <nav class="topnav" aria-label="主要导航">
+      <button class="nav-link active" data-page="scores">调查积分榜</button>
+      <button class="nav-link" data-page="carries">主 C 榜</button>
+      <button class="nav-link" data-page="players">玩家榜</button>
+    </nav>
+    <div class="top-actions">
+      <button class="ghost-button" id="account">管理员登录</button>
+      <button class="gold-button small" id="submitScore" disabled>投稿成绩</button>
+    </div>
+  </header>
+  <main class="main-shell">
+    <section class="bulletin-cover" aria-labelledby="headline">
+      <div><p class="eyebrow">重返未来：1999 · 玩家调查记录</p><h1 id="headline">鬃毛邮报</h1>
+      <p>按调查对象与塑造分组查阅高分配队。</p></div>
+      <div class="issue-details"><strong>4.1</strong><span>亚特兰蒂斯谋杀案</span><time>11/05 – 12/10</time></div>
+    </section>
+    <div id="notice" role="status"></div>
+    <section id="scores" class="content-section" aria-label="鬃毛邮报排行榜">
+      <div id="filters"></div>
+      <div id="board"></div>
+    </section>
+  </main>
+  <footer class="footer">
+    <div><b>站长 · 幻化凌风</b> · <a class="text-button" href="https://space.bilibili.com/266889606" rel="noopener noreferrer" target="_blank">B 站主页 ↗</a>
+      <div>管理员 · 寻屿、莳雨枫椛</div></div>
+    <div><a class="text-button" href="https://res1999.huijiwiki.com/wiki/鬃毛邮报4.1" rel="noopener noreferrer" target="_blank">Wiki · 鉴藏者特版 ↗</a>
+      <a class="text-button" href="https://res1999.huijiwiki.com/wiki/鬃毛邮报" rel="noopener noreferrer" target="_blank">Wiki · 往期首领 ↗</a>
+      <p>非官方玩家社区榜。数据以审核通过的游戏结算截图为准。</p></div>
+  </footer>
+  <dialog id="dialog" class="modal" aria-labelledby="dialogTitle"></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
