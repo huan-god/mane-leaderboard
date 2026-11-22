@@ -155,6 +155,14 @@ const CHARACTER_ROSTER = new Map([
   ["伊芙琳", { id: 10140, aff: 'beast', star: 6, en: "Evelyn" }]
 ]);
 
+export const CHARACTER_LIST = [...CHARACTER_ROSTER.entries()]
+  .map(([name, meta]) => ({
+    name,
+    ...meta,
+    portrait: `./assets/portraits/${meta.id}.webp`
+  }))
+  .sort((a, b) => (b.star - a.star) || (b.id - a.id));
+
 // 社区常见简称 / 异体字 / 英文别名映射
 const CHARACTER_ALIASES = new Map([
   ['joe', 'J'],

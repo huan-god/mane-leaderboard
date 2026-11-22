@@ -1,5 +1,5 @@
 
-.submission-status{display:inline-flex;align-items:center;gap:.32em;padding:.2em .58em;border:1px solid currentColor;border-radius:3px;font-size:.85rem;line-height:1.45;white-space:nowrap}
+.submission-status,.resonance-tag{display:inline-flex;align-items:center;gap:.32em;padding:.2em .58em;border:1px solid currentColor;border-radius:3px;font-size:.85rem;line-height:1.45;white-space:nowrap}
 .submission-status{color:var(--muted)}
 .submission-status.status-pending{color:var(--gold)}
 .submission-status.status-approved{color:var(--success)}
@@ -10,9 +10,18 @@
 .rejection-form .field{margin:0}
 .rejection-error{margin:.55rem 0;color:#ffb1ad}
 .rejection-error:empty{display:none}
+.resonance-tag{color:#f8db9e;background:#423320;font-weight:700}
+button.resonance-tag[aria-pressed="true"]{color:#211508;background:#f4cd7d;border-color:#f4cd7d}
+button.resonance-tag:focus-visible,.resonance-choice input:focus-visible{outline:2px solid var(--gold);outline-offset:3px}
+.resonance-filter{margin-top:.75rem}
+.resonance-choice{display:flex;align-items:center;gap:.55rem;padding:.65rem .75rem;margin:.35rem 0 .85rem;border:1px solid var(--line)}
+.resonance-choice[hidden]{display:none}
+.resonance-choice input{width:1.05rem;height:1.05rem;accent-color:var(--gold)}
 .topnav{flex-wrap:wrap}
 
 .moderation-filter{display:grid;grid-template-columns:1.1fr 1.25fr .85fr auto;gap:.65rem;align-items:end;margin:0 0 1rem}
 .moderation-filter .field{min-width:0;margin:0}
 .moderation-filter-actions,.moderation-pagination{display:flex;flex-wrap:wrap;gap:.65rem;align-items:center}
+.resonance-tag + .text-button{margin-inline-start:.55em}
+.ranking-division{max-width:23rem;margin-bottom:1rem}
 @media(max-width:720px){.moderation-filter{grid-template-columns:repeat(2,minmax(0,1fr))}}

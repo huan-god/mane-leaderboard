@@ -2,17 +2,18 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#161210" />
-  <meta name="description" content="重返未来：1999 非官方玩家榜单总署——融合「鬃毛邮报」调查积分榜与「焦点闪回」最短回合纪录，完整兼容社区投稿与审核体系。" />
+  <meta name="description" content="重返未来：1999 玩家社区榜单——融合「鬃毛邮报」调查积分榜与「焦点闪回」最短回合纪录，完整兼容社区投稿与审核体系。" />
   <title>重返未来：1999 · 鬃毛邮报 &amp; 焦点闪回 玩家榜单</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%231b1411' stroke='%23df6931' stroke-width='3'/%3E%3Ctext x='32' y='43' text-anchor='middle' font-size='32' font-family='serif' fill='%23ede4d7'%3E%E9%82%AE%3C/text%3E%3C/svg%3E" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;600;700&family=Cormorant+Garamond:ital,wght@0,500;0,600;1,500;1,600&family=Noto+Serif+SC:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="./styles.css?v=20261122-unified" />
-  <link rel="stylesheet" href="./mobile.css?v=20261122-mobile2" />
+  <link rel="stylesheet" href="./styles.css?v=20261122p" />
+  <link rel="stylesheet" href="./submission-progress.css?v=20261122p" />
   <script src="./config.js"></script>
-  <script type="module" src="./app.js?v=20261122-mobile2"></script>
+  <script type="module" src="./app.js?v=20261122p"></script>
 </head>
 <body data-mode="mane">
   <!-- 实机老报纸网点与纸纤维暗角底纹（参考 game-mane-survey.png / game-mane-atlantis.png） -->
@@ -52,11 +53,11 @@
           <span class="status-dot"></span>
           <span id="connectionText">连接档案库…</span>
         </span>
-        <button id="adminCenterBtn" class="ghost-btn" hidden>管理后台</button>
-        <button type="button" class="ghost-btn" data-action="my-submissions">我的投稿</button>
-        <button id="accountBtn" class="ghost-btn">管理员登录</button>
+        <button id="adminCenterBtn" class="ghost-btn" hidden><span class="acc-full">管理后台</span><span class="acc-short">后台</span></button>
+        <button type="button" class="ghost-btn" data-action="my-submissions"><span class="acc-full">我的投稿</span><span class="acc-short">进度</span></button>
+        <button id="accountBtn" class="ghost-btn"><span class="acc-full">管理员登录</span><span class="acc-short">登录</span></button>
         <button id="submitBtn" class="action-cta-btn" disabled>
-          <span class="cta-main">＋ 投稿成绩</span>
+          <span class="cta-main">＋ 投稿<span class="cta-ext">成绩</span></span>
           <span class="cta-sub" aria-hidden="true">SUBMIT ▽▽</span>
         </button>
       </div>
@@ -83,18 +84,16 @@
     <div class="footer-inner">
       <div class="footer-col">
         <div class="footer-brand">
-          <strong>REVERSE: 1999 · 民间挑战档案总署</strong>
+          <strong>REVERSE: 1999 · 玩家社区榜单</strong>
           <span>鬃毛邮报调查积分榜 × 焦点闪回最短回合榜</span>
         </div>
         <p class="footer-credits">
-          站长：幻化凌风（<a href="https://space.bilibili.com/266889606" target="_blank" rel="noopener noreferrer">哔哩哔哩主页 ↗</a>）·
-          管理员：寻屿、莳雨枫椛、偶尔出现的神秘猫猫头、椋-喵、麒麟kt、omio
+          社区榜单站长：幻化凌风（<a href="https://space.bilibili.com/266889606" target="_blank" rel="noopener noreferrer">哔哩哔哩主页 ↗</a>）·
+          管理员：寻屿、莳雨枫椛、偶尔出现的神秘猫猫头、椋-喵
         </p>
       </div>
       <div class="footer-col footer-links">
         <div class="footer-ref-links">
-          <a href="https://huan-god.github.io/mane-leaderboard/">鬃毛邮报榜 ↗</a>
-          <a href="https://huan-god.github.io/flashback-leaderboard/">焦点闪回榜 ↗</a>
           <a href="https://res1999.huijiwiki.com/wiki/%E9%AC%83%E6%AF%9B%E9%82%AE%E6%8A%A5" target="_blank" rel="noopener noreferrer">灰机 Wiki · 鬃毛邮报 ↗</a>
           <a href="https://res1999.huijiwiki.com/wiki/%E7%84%A6%E7%82%B9%E9%97%AA%E5%9B%9E" target="_blank" rel="noopener noreferrer">灰机 Wiki · 焦点闪回 ↗</a>
         </div>
@@ -106,6 +105,8 @@
   </footer>
 
   <div id="modalRoot"></div>
+  <div id="charPickerRoot"></div>
+  <div id="psyPickerRoot"></div>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 </body>
 </html>
