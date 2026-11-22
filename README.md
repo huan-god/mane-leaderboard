@@ -6,5 +6,6 @@
 
 - 新图名单与排期见[鉴藏者特版](https://res1999.huijiwiki.com/wiki/鬃毛邮报4.1)。
 - 复刻目录按 [Wiki 3.2 以后往期调查对象](https://res1999.huijiwiki.com/wiki/鬃毛邮报)整理，实际挑战资格以游戏内怪相档案为准。
-- Supabase 共用现有的账号和三位管理员的授权，排行榜数据使用独立的 `mane_*` 表和 `mane-proofs` 私有桶。将 `001_mane_leaderboard.sql` 至 `003_mane_carry_total_leaderboard.sql` 依次应用到现有 Supabase 项目后，由 GitHub Pages 从 `main` 根目录发布。
+- Supabase 共用现有的账号和管理员的授权，排行榜数据使用独立的 `mane_*` 表和 `mane-proofs` 私有桶。按文件名顺序应用各编号 SQL 迁移后，由 GitHub Pages 从 `main` 根目录发布。
+- 管理员可以从「已拒绝」列表删除成绩。系统保留原始记录和截图供追溯。
 - 管理员收取既有 Supabase 账号的邮件登录链接。同一站点域名下两个站共享会话。邮箱回跳地址由 Supabase Auth 的许可列表决定。

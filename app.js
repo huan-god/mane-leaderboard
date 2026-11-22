@@ -202,7 +202,7 @@ async function openAdmin(status='pending') {
     `<button class="outline-button ${key===status?'selected':''}" data-action="admin" data-value="${key}">${label}</button>`).join('')}
     <button class="outline-button" data-action="maps">地图管理</button></div><div id="reviewList">正在读取…</div>`);
   const list=$('#reviewList');
-  const rows=await checked(sb.from('mane_entries').select('id,status,display_name,map_id,division,team,carry,score,evidence_path,created_at,updated_at,related_url,review_note').eq('status',status).order('created_at',{ascending:false}).limit(200));
+  const rows=await checked(sb.from('mane_entries').select('id,status,display_name,map_id,division,team,carry,score,evidence_path,created_at,updated_at,related_url,review_note').eq('status',status).is('archived_at',null).order('created_at',{ascending:false}).limit(200));
   if (!list.isConnected) return;
   list.innerHTML=rows.map(row=>{
     const map=state.maps.find(item=>item.id===row.map_id);
@@ -213,7 +213,8 @@ async function openAdmin(status='pending') {
       <div class="review-actions"><button class="outline-button" data-action="proof" data-id="${row.id}">查看截图</button>
       <button class="outline-button" data-action="edit" data-id="${row.id}">编辑成绩</button>
       ${status==='pending'?'<button class="approve" data-action="approve">审核通过</button><button class="reject" data-action="reject">拒绝</button>':''}
-      ${status==='approved'?'<button class="reject" data-action="remove">撤下</button>':''}</div>
+      ${status==='approved'?'<button class="reject" data-action="remove">撤下</button>':''}
+      ${status==='rejected'?'<button class="reject" data-action="delete-rejected">删除</button>':''}</div>
       <div class="review-proof" role="status"></div></article>`;
   }).join('')||'<p class="minor">这组暂无成绩。</p>';
   for(const [index,card] of Array.from(list.children).entries()){
@@ -282,6 +283,16 @@ document.addEventListener('click',async event=>{
     if (action==='maps')await openMaps();
     if (action==='edit')await openEdit(id);
     if (action==='proof')await showProof(id,button.closest('.review-card').querySelector('.review-proof'));
+    if (action==='delete-rejected'&&!button.disabled&&window.confirm('删除这条已拒绝的成绩？')){
+      const {entry,revision}=button.closest('.review-card').dataset;
+      button.disabled=true;
+      try{
+        await checked(sb.rpc('mane_archive_rejected',{p_id:entry,p_updated_at:revision}));
+        await openAdmin('rejected');
+        toast('已删除这条成绩。');
+      }finally{button.disabled=false;}
+      return;
+    }
     if (action==='toggle-map'){
       if (value==='true'&&!window.confirm('隐藏此地图和该地图的榜单？'))return;
       await checked(sb.from('mane_maps').update({active:value!=='true'}).eq('id',id));
