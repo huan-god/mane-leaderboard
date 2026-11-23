@@ -39,6 +39,7 @@ import {
   showRejectionForm
 } from './submission-progress.js';
 import { validateLineup } from './flashback-logic.mjs';
+import {beijingDayRange, beijingTime, exportManeWorkbook, rankManeCarryTotals, todayInBeijing} from './mane-reports.js?v=20261123-reports';
 
 const $ = (sel) => document.querySelector(sel);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (ch) =>
@@ -86,7 +87,8 @@ const MIME_TO_EXT = {
 
 const state = {
   mode: 'mane',           // 'mane' | 'flashback'
-  manePage: 'scores',     // 'scores' | 'totals' | 'rules'
+  manePage: 'scores',
+  maneDaily: {date: '', basis: 'approved_at', division: '', map: ''},
   fbPage: 'leaderboard',  // 'leaderboard' | 'carries' | 'players' | 'rules'
 
   connected: false,
@@ -780,7 +782,7 @@ function readHash() {
 
   if (m === 'mane') {
     state.mode = 'mane';
-    if (['scores', 'totals', 'players', 'rules'].includes(p)) state.manePage = p;
+    if (['scores', 'totals', 'daily', 'players', 'rules'].includes(p)) state.manePage = p;
     const sec = params.get('sec');
     if (sec === 'new' || sec === 'rerun') state.maneSection = sec;
     const div = params.get('div');
@@ -1212,6 +1214,7 @@ function renderChrome() {
   const tabs = state.mode === 'mane'
     ? [
         ['scores', '调查积分榜'],
+        ['daily', '每日新分'],
         ['totals', '主 C 总分榜'],
         ['players', '玩家荣誉殿堂'],
         ['rules', '投稿与规则']
@@ -1419,7 +1422,85 @@ function renderFlashbackStageMechanicsDrawer(mech) {
 }
 
 /* ==================== 鬃毛邮报页面渲染 ==================== */
+const MANE_DAILY_BASES = {approved_at: '按审核通过日', created_at: '按投稿日'};
+
+async function loadManeDailyRows({date, basis, division, mapIds}) {
+  const [start, end] = beijingDayRange(date);
+  const rows = [];
+  for (let offset = 0; ; offset += 500) {
+    let query = sb.from('mane_daily_scores').select('id,map_id,division,display_name,carry,team,score,created_at,approved_at,related_url')
+      .gte(basis, start).lt(basis, end);
+    if (division) query = query.eq('division', division);
+    if (mapIds.length) query = query.in('map_id', mapIds);
+    const page = await checked(query.order(basis, {ascending: false}).order('id').range(offset, offset + 499));
+    rows.push(...page);
+    if (page.length < 500) return rows;
+  }
+}
+
+function renderManeDaily() {
+  const {date, basis, division, map} = state.maneDaily;
+  const today = todayInBeijing();
+  const mapOptions = state.maneMaps.map((m) => [m.id, `${m.edition} · ${m.name}`]);
+  return `<section class="board-panel">
+    <div class="board-header">
+      <div class="board-title-stack">
+        <h2>每日新分</h2>
+        <p class="board-subtitle">按北京时间统计已通过的成绩。功能上线前的记录可按投稿日查看。</p>
+      </div>
+      <button type="button" class="outline-btn" data-action="refresh-mane-daily">刷新</button>
+    </div>
+    <div class="form-grid" style="padding:16px 16px 0">
+      <div class="field"><label for="maneDailyDate">日期</label>
+        <input id="maneDailyDate" type="date" data-mane-daily="date" value="${esc(date || today)}" max="${today}" />
+      </div>
+      <div class="field"><label for="maneDailyBasis">日期依据</label>
+        <select id="maneDailyBasis" data-mane-daily="basis">${optionsHtml(Object.entries(MANE_DAILY_BASES), basis)}</select>
+      </div>
+      <div class="field"><label for="maneDailyDivision">塑造</label>
+        <select id="maneDailyDivision" data-mane-daily="division">${optionsHtml([['', '全部塑造'], ...Object.entries(DIVISIONS)], division)}</select>
+      </div>
+      <div class="field"><label for="maneDailyMap">关卡</label>
+        <select id="maneDailyMap" data-mane-daily="map">${optionsHtml([['', '全部关卡'], ...mapOptions], map)}</select>
+      </div>
+    </div>
+    <div id="maneDailyResults" aria-live="polite"><p class="board-foot">${state.loading ? '正在连接档案库…' : '正在读取成绩…'}</p></div>
+  </section>`;
+}
+
+async function fillManeDailyResults(host) {
+  if (!state.connected) {
+    if (!state.loading) host.textContent = '暂时无法连接档案库。';
+    return;
+  }
+  const {date, basis, division, map} = state.maneDaily;
+  try {
+    const rows = await loadManeDailyRows({date: date || todayInBeijing(), basis, division, mapIds: map ? [map] : []});
+    if (!host.isConnected) return;
+    if (!rows.length) {
+      host.innerHTML = '<div class="empty-state"><h3>当天暂无符合条件的成绩</h3></div>';
+      return;
+    }
+    const mapById = new Map(state.maneMaps.map((m) => [m.id, m]));
+    host.innerHTML = `<p class="board-foot">共 ${rows.length} 条已通过成绩</p>
+      <div class="table-scroll"><table class="archive-table">
+        <thead><tr><th>时间</th><th>关卡</th><th>塑造</th><th>玩家</th><th>主 C / 阵容</th><th class="num-col">积分</th></tr></thead>
+        <tbody>${rows.map((row) => `<tr>
+          <td>${esc(beijingTime(row[basis]).split(' ')[1])}</td>
+          <td>${esc(mapById.get(row.map_id)?.name || '')}</td>
+          <td>${esc(DIVISIONS[row.division])}</td>
+          <td>${esc(row.display_name)}</td>
+          <td><strong>${esc(row.carry)}</strong><br>${esc((row.team || []).join('、'))} ${safeLinkHtml(row.related_url)}</td>
+          <td class="num-col"><span class="score-value">${formatScore(row.score)}</span></td>
+        </tr>`).join('')}</tbody>
+      </table></div>`;
+  } catch {
+    if (host.isConnected) host.textContent = '成绩暂时无法读取，请点击刷新。';
+  }
+}
+
 function renderManeWorkspace() {
+  if (state.manePage === 'daily') return renderManeDaily();
   const newMaps = activeManeMaps('new');
   const rerunMaps = activeManeMaps('rerun');
   const maps = activeManeMaps(state.maneSection);
@@ -1718,55 +1799,7 @@ function renderManeTotals(latestEdition, sectionMaps = []) {
     ? sectionMaps.map((m) => `「${m.name}」`).join('、')
     : `全部 ${totalMapsCount} 张怪相档案复刻首领图`;
 
-  // 按统一角色规范 ID 合并异体/简称写法（如「银装小春雀」与「银装小春雀儿」合并并按单图取最高分）
-  const mergedByChar = new Map();
-  for (const row of state.maneTotals) {
-    if (row.section !== state.maneSection || row.edition !== editionKey || row.division !== state.maneDivision) continue;
-    const key = canonicalCharacterKey(row.carry_name);
-    const displayName = canonicalDisplayName(row.carry_name);
-    let bucket = mergedByChar.get(key);
-    if (!bucket) {
-      bucket = {
-        key,
-        carry_name: displayName,
-        rawNames: new Set(),
-        mapBest: new Map()
-      };
-      mergedByChar.set(key, bucket);
-    }
-    bucket.rawNames.add(row.carry_name);
-    for (const m of (row.map_scores || [])) {
-      const mKey = m.map_id || m.name;
-      const prev = bucket.mapBest.get(mKey);
-      if (!prev || BigInt(m.score || 0) > BigInt(prev.score || 0)) {
-        bucket.mapBest.set(mKey, m);
-      }
-    }
-  }
-
-  const rows = [...mergedByChar.values()]
-    .map((b) => {
-      const mapScores = [...b.mapBest.values()].sort((a, c) => {
-        const diff = BigInt(c.score || 0) - BigInt(a.score || 0);
-        return diff > 0n ? 1 : diff < 0n ? -1 : String(a.name).localeCompare(String(c.name), 'zh-CN');
-      });
-      let total = 0n;
-      for (const m of mapScores) total += BigInt(m.score || 0);
-      return {
-        carry_key: b.key,
-        carry_name: b.carry_name,
-        mergedAliases: b.rawNames.size > 1 ? [...b.rawNames] : [],
-        map_count: mapScores.length,
-        map_scores: mapScores,
-        total
-      };
-    })
-    .sort((a, b) => {
-      if (a.total !== b.total) return a.total > b.total ? -1 : 1;
-      return (b.map_count - a.map_count) ||
-        String(a.carry_name).localeCompare(String(b.carry_name), 'zh-CN') ||
-        String(a.carry_key).localeCompare(String(b.carry_key));
-    });
+  const rows = rankManeCarryTotals(state.maneTotals, state.maneSection, editionKey, state.maneDivision);
 
   return `
     <div class="board-panel">
@@ -3417,6 +3450,87 @@ async function renderFilteredAdmin(list, mode, tab, locationLabel, groups, fetch
   await load();
 }
 
+function openManeExport(status) {
+  if (!state.isAdmin) return toast('仅管理员可导出成绩。');
+  const groups = new Map();
+  for (const map of state.maneMaps) {
+    const group = `${map.edition} · ${MANE_SECTIONS[map.section]}`;
+    if (!groups.has(group)) groups.set(group, []);
+    groups.get(group).push(map);
+  }
+  const today = todayInBeijing();
+  const {date, basis} = state.maneDaily;
+  openModal(`
+    <div class="modal-eyebrow">MANE’S BULLETIN · EXPORT</div>
+    <h2>导出鬃毛邮报成绩</h2>
+    <form id="maneExportForm">
+      <fieldset style="border:1px solid var(--line-hair);margin:0 0 12px;min-width:0">
+        <legend>导出内容</legend>
+        <div style="display:flex;flex-wrap:wrap;gap:12px">
+          <label><input type="checkbox" name="sheet" value="daily" checked> 每日新分</label>
+          <label><input type="checkbox" name="sheet" value="totals" checked> 主 C 总计</label>
+        </div>
+      </fieldset>
+      <div class="form-grid">
+        <div class="field"><label for="maneExportDate">新分日期</label>
+          <input id="maneExportDate" name="date" type="date" value="${esc(date || today)}" max="${today}" />
+        </div>
+        <div class="field"><label for="maneExportBasis">新分日期依据</label>
+          <select id="maneExportBasis" name="basis">${optionsHtml(Object.entries(MANE_DAILY_BASES), basis)}</select>
+        </div>
+        <div class="field"><label for="maneExportDivision">塑造</label>
+          <select id="maneExportDivision" name="division">${optionsHtml([['', '全部塑造'], ...Object.entries(DIVISIONS)], '')}</select>
+        </div>
+      </div>
+      <fieldset style="border:1px solid var(--line-hair);margin:0 0 12px;min-width:0">
+        <legend>关卡（可多选）</legend>
+        <div class="form-actions" style="justify-content:flex-start;margin:6px 0">
+          <button type="button" class="outline-btn" data-mane-export-maps="all">全选</button>
+          <button type="button" class="outline-btn" data-mane-export-maps="none">清空</button>
+        </div>
+        <div style="max-height:190px;overflow:auto">
+          ${[...groups].map(([group, maps]) => `<div>
+            <strong class="field-hint">${esc(group)}</strong>
+            ${maps.map((map) => `<label style="display:flex;align-items:center;gap:8px">
+              <input type="checkbox" name="map" value="${esc(map.id)}" checked> ${esc(map.name)}
+            </label>`).join('')}
+          </div>`).join('')}
+        </div>
+      </fieldset>
+      <p class="field-hint">主 C 总计按分区、版本和塑造分别排名，所选关卡各取最高分。日期只影响每日新分。</p>
+      <div class="form-actions">
+        <button type="button" class="outline-btn" data-mane-admin="${esc(status)}">返回审核</button>
+        <button type="submit" class="copper-btn">下载 Excel</button>
+      </div>
+    </form>`, true);
+}
+
+async function submitManeExport(form) {
+  if (!state.isAdmin) throw new Error('仅管理员可导出成绩。');
+  const fields = new FormData(form);
+  const sheets = new Set(fields.getAll('sheet'));
+  const selected = new Set(fields.getAll('map'));
+  const maps = state.maneMaps.filter((map) => selected.has(map.id));
+  if (!sheets.size) throw new Error('请至少选择一种导出内容。');
+  if (!maps.length) throw new Error('请至少选择一个关卡。');
+  const division = fields.get('division');
+  const basis = fields.get('basis');
+  if ((division && !Object.hasOwn(DIVISIONS, division)) || !Object.hasOwn(MANE_DAILY_BASES, basis)) {
+    throw new Error('筛选条件无效，请重新选择。');
+  }
+  const date = sheets.has('daily') ? fields.get('date') : todayInBeijing();
+  const [dailyRows, totals] = await Promise.all([
+    sheets.has('daily') ? loadManeDailyRows({date, basis, division, mapIds: maps.map((map) => map.id)}) : null,
+    sheets.has('totals') ? loadPages('mane_carry_total_leaderboard', ['section','edition','division','carry_key']) : null
+  ]);
+  if (!form.isConnected || !state.isAdmin) return;
+  await exportManeWorkbook({
+    date, basis, divisions: division ? [division] : Object.keys(DIVISIONS), maps, dailyRows, totals,
+    divisionLabels: DIVISIONS, sectionLabels: MANE_SECTIONS,
+    canDownload: () => form.isConnected && state.isAdmin
+  });
+}
+
 async function openManeAdmin(status = 'pending') {
   if (!state.isAdmin) return toast('仅管理员可访问审核后台。');
   openModal(`
@@ -3426,6 +3540,7 @@ async function openManeAdmin(status = 'pending') {
       ${Object.entries(STATUS_LABELS).map(([k, lbl]) =>
         `<button class="outline-btn ${k === status ? 'selected' : ''}" data-mane-admin="${k}">${lbl}</button>`
       ).join('')}
+      <button type="button" class="outline-btn" data-mane-export="${esc(status)}">导出 Excel</button>
       <button class="outline-btn" data-action="mane-maps-admin">地图管理</button>
       <button class="ghost-btn" data-action="fb-admin-open">切换至焦点闪回后台 ⇄</button>
     </div>
@@ -3657,6 +3772,8 @@ function render() {
   $('#workspace').innerHTML = state.mode === 'mane'
     ? renderManeWorkspace()
     : renderFlashbackWorkspace();
+  const dailyResults = $('#maneDailyResults');
+  if (dailyResults) void fillManeDailyResults(dailyResults);
 
   // 移动端横向滑动首领/关卡条自动将当前选中项居中（仅调节横向 scrollLeft，不影响整页纵滚）
   const dossierList = document.querySelector('.dossier-list');
@@ -4003,6 +4120,7 @@ document.addEventListener('click', async (ev) => {
       return;
     }
     if (action === 'refresh') { await loadAllData(); if (state.connected) toast('实时榜单档案已更新。'); return; }
+    if (action === 'refresh-mane-daily') { render(); return; }
     if (action === 'open-submit' || btn.id === 'submitBtn') {
       if (state.mode === 'mane') openManeSubmitModal();
       else openFbSubmitModal();
@@ -4031,6 +4149,13 @@ document.addEventListener('click', async (ev) => {
 
     // 鬃毛管理员操作
     if (btn.dataset.maneAdmin) { await openManeAdmin(btn.dataset.maneAdmin); return; }
+    if (btn.dataset.maneExport) { openManeExport(btn.dataset.maneExport); return; }
+    if (btn.dataset.maneExportMaps) {
+      for (const input of btn.closest('form').querySelectorAll('input[name="map"]')) {
+        input.checked = btn.dataset.maneExportMaps === 'all';
+      }
+      return;
+    }
     if (action === 'mane-maps-admin') { await openManeMapsAdmin(); return; }
     if (btn.dataset.maneProof) {
       const card = btn.closest('.review-card');
@@ -4203,7 +4328,8 @@ document.addEventListener('click', async (ev) => {
 
 document.addEventListener('change', (ev) => {
   const t = ev.target;
-  if (t.id === 'maneCarrySelect') { state.maneCarry = t.value; render(); }
+  if (t.dataset.maneDaily) { state.maneDaily[t.dataset.maneDaily] = t.value; render(); }
+  else if (t.id === 'maneCarrySelect') { state.maneCarry = t.value; render(); }
   else if (t.id === 'fbVersionSelect') {
     state.fbVersionId = t.value;
     state.fbStageId = standardStages(state.fbVersionId)[0]?.id || '';
@@ -4266,6 +4392,8 @@ document.addEventListener('submit', async (ev) => {
   try {
     if (form.id === 'maneSubmitForm') {
       await handleManeSubmit(form);
+    } else if (form.id === 'maneExportForm') {
+      await submitManeExport(form);
     } else if (form.id === 'maneEditForm' && state.isAdmin) {
       const patch = readManeFields(new FormData(form));
       let updated;
