@@ -781,6 +781,7 @@ function closeModal() {
   closeCharPicker();
   closePsychubePicker();
   $('#modalRoot').innerHTML = '';
+  void refreshReviewedBoards();
 }
 
 function decodeImageFile(blob) {
@@ -931,29 +932,26 @@ function buildRecordDeepLink(item) {
 
 /* ==================== 实时加载双榜数据 ==================== */
 async function loadAllData() {
+  await reviewedBoardRefresh;
+  const coveredBoards = [...reviewedBoards];
+  reviewedBoards.clear();
   state.loading = true;
   renderChrome();
   try {
     const [
       maneMaps,
-      maneScores,
-      maneTotals,
+      maneData,
       fbVersions,
       fbStages,
-      fbRecords,
-      fbPlayers,
-      fbArchives,
-      fbCarries
+      flashbackData,
+      fbArchives
     ] = await Promise.all([
       checked(sb.from('mane_maps').select('id,name,section,edition,position,opens_at,active').eq('active', true)),
-      loadPages('mane_leaderboard', ['id']),
-      loadPages('mane_carry_total_leaderboard', ['section', 'edition', 'division', 'carry_key']),
+      fetchPublicBoardData('mane'),
       checked(sb.from('versions').select('id,code,label,created_at')),
       checked(sb.from('stages').select('id,version_id,stage_no,name,challenge_id')),
-      loadPages('leaderboard_records', ['id']),
-      loadPages('flashback_player_rankings_by_scope', ['version_id', 'player_id']),
-      checked(sb.from('historical_records').select('id,stage_id,group_code,display_order,carry_names,lineup_label,credited_player')),
-      loadPages('carry_rankings_by_scope', ['version_id', 'carry_name'], 'version_id,carry_name,challenge_count')
+      fetchPublicBoardData('flashback'),
+      checked(sb.from('historical_records').select('id,stage_id,group_code,display_order,carry_names,lineup_label,credited_player'))
     ]);
 
     state.maneMaps = (maneMaps || []).sort((a, b) =>
@@ -961,18 +959,14 @@ async function loadAllData() {
       (a.position - b.position) ||
       String(a.name).localeCompare(String(b.name), 'zh-CN')
     );
-    state.maneScores = maneScores || [];
-    state.maneTotals = maneTotals || [];
+    Object.assign(state, maneData, flashbackData);
 
     state.fbVersions = (fbVersions || []).sort((a, b) =>
       String(b.code).localeCompare(String(a.code), 'zh-CN', { numeric: true }) ||
       (Date.parse(b.created_at) - Date.parse(a.created_at))
     );
     state.fbStages = fbStages || [];
-    state.fbRecords = fbRecords || [];
     state.fbArchives = fbArchives || [];
-    state.fbCarries = fbCarries || [];
-    state.fbPlayers = fbPlayers || [];
 
     if (state.maneMapId) {
       const matchedMap = state.maneMaps.find((m) => m.id === state.maneMapId);
@@ -1000,13 +994,56 @@ async function loadAllData() {
     state.connected = true;
     state.errorNotice = '';
   } catch (err) {
+    coveredBoards.forEach((board) => { reviewedBoards.add(board); });
     console.error(err);
     state.connected = false;
     state.errorNotice = '暂时无法连接实时榜单档案库，请检查网络后点击重试。';
   } finally {
     state.loading = false;
     render();
+    if (state.connected) void refreshReviewedBoards();
   }
+}
+
+const reviewedBoards = new Set();
+let reviewedBoardRefresh = null;
+
+async function fetchPublicBoardData(board) {
+  if (board === 'mane') {
+    const [maneScores, maneTotals] = await Promise.all([
+      loadPages('mane_leaderboard', ['id']),
+      loadPages('mane_carry_total_leaderboard', ['section', 'edition', 'division', 'carry_key'])
+    ]);
+    return {maneScores, maneTotals};
+  }
+
+  const [fbRecords, fbPlayers, fbCarries] = await Promise.all([
+    loadPages('leaderboard_records', ['id']),
+    loadPages('flashback_player_rankings_by_scope', ['version_id', 'player_id']),
+    loadPages('carry_rankings_by_scope', ['version_id', 'carry_name'], 'version_id,carry_name,challenge_count')
+  ]);
+  return {fbRecords, fbPlayers, fbCarries};
+}
+
+function refreshReviewedBoards() {
+  if (reviewedBoardRefresh || !reviewedBoards.size || state.loading || $('#modalOverlay')) return;
+  const boards = [...reviewedBoards];
+  reviewedBoards.clear();
+  reviewedBoardRefresh = Promise.allSettled(boards.map(fetchPublicBoardData)).then((results) => {
+    let failed = false;
+    for (const [index, result] of results.entries()) {
+      if (result.status === 'fulfilled') {
+        Object.assign(state, result.value);
+        continue;
+      }
+      reviewedBoards.add(boards[index]);
+      failed = true;
+      console.error(result.reason);
+    }
+    reviewedBoardRefresh = null;
+    if (results.some((result) => result.status === 'fulfilled')) render();
+    if (!failed) void refreshReviewedBoards();
+  });
 }
 
 async function syncAuth(sessionInput) {
@@ -3617,6 +3654,7 @@ const adminFilters = {
   mane: {tab: '', name: '', location: '', division: '', page: 0},
   flashback: {tab: '', name: '', location: '', division: '', page: 0}
 };
+const moderationReloads = new WeakMap();
 
 async function renderFilteredAdmin(list, mode, tab, locationLabel, groups, fetchRows, renderRows) {
   if (!list?.isConnected) return;
@@ -3631,15 +3669,15 @@ async function renderFilteredAdmin(list, mode, tab, locationLabel, groups, fetch
   list.insertAdjacentHTML('beforebegin', moderationFilterFields(filters, locationLabel, groups));
 
   let request = 0;
-  async function load() {
+  async function load(keepRows = false) {
     const current = ++request;
-    list.textContent = '正在读取投稿…';
+    if (!keepRows) list.textContent = '正在读取投稿…';
     try {
       const rows = await fetchRows(filters);
       if (!list.isConnected || current !== request) return;
       if (!rows.length && filters.page > 0) {
         filters.page--;
-        return load();
+        return load(keepRows);
       }
       list.innerHTML = renderRows(rows.slice(0, moderationPageSize)) +
         moderationPager(filters.page, rows.length > moderationPageSize);
@@ -3647,8 +3685,86 @@ async function renderFilteredAdmin(list, mode, tab, locationLabel, groups, fetch
       if (list.isConnected && current === request) list.textContent = `读取失败：${error.message}`;
     }
   }
+  moderationReloads.set(list, {tab, load});
   bindModerationFilters(list.previousElementSibling, list, filters, load);
   await load();
+}
+
+async function finishReview(dialog, board, tab, message, { changedRankings = false, card = null } = {}) {
+  if (changedRankings) reviewedBoards.add(board);
+  toast(message);
+  if (!dialog?.isConnected) {
+    void refreshReviewedBoards();
+    return;
+  }
+
+  const current = moderationReloads.get(dialog.querySelector('#adminList'));
+  if (current?.tab === tab) {
+    card?.remove();
+    await current.load(true);
+  } else if (board === 'mane') {
+    await openManeAdmin(tab);
+  } else {
+    await openFbAdmin(tab);
+  }
+}
+
+async function showReviewProof(button) {
+  const card = button.closest('.review-card');
+  const box = card?.querySelector('.review-proof');
+  if (!box) return;
+  const status = box.querySelector('.review-proof-status');
+  const original = button.dataset.proofSize === 'original';
+  const size = original ? 'original' : 'preview';
+  if (box.dataset.proofSize === size) return;
+  const board = button.dataset.maneProof ? 'mane' : 'flashback';
+  const id = button.dataset.maneProof || button.dataset.fbProof;
+  const controls = card.querySelectorAll('[data-mane-proof], [data-fb-proof]');
+  if ([...controls].some((control) => control.disabled)) return;
+  controls.forEach((control) => { control.disabled = true; });
+  status.textContent = original ? '正在读取原图…' : '正在生成截图预览…';
+  try {
+    let file;
+    if (original) {
+      const table = board === 'mane' ? 'mane_entries' : 'submissions';
+      const bucket = board === 'mane' ? 'mane-proofs' : 'proofs';
+      const row = await checked(sb.from(table).select('evidence_path').eq('id', id).single());
+      file = await checked(sb.storage.from(bucket).download(row.evidence_path));
+    } else {
+      file = await checked(sb.functions.invoke('moderation-proof-preview', {
+        body: {board, id}, region: 'ap-northeast-1', timeout: 15000
+      }));
+      if (file instanceof Blob) file = new Blob([file], {type: 'image/jpeg'});
+    }
+
+    const img = await decodeImageFile(file);
+    if (!box.isConnected) return;
+    img.alt = original ? '审核截图原图' : '审核截图预览';
+    img.className = 'proof-img';
+    box.querySelector('.review-proof-image').replaceChildren(img);
+    box.dataset.proofSize = size;
+    status.textContent = original ? '正在显示原图。' : '正在显示压缩预览。';
+  } catch {
+    if (box.isConnected) {
+      status.textContent = original ? '原图读取失败，截图可能已过期。' : '预览暂不可用，可选择「查看原图」。';
+    }
+  } finally {
+    controls.forEach((control) => { control.disabled = false; });
+  }
+}
+
+function reviewProofHtml(board, id, hasProof) {
+  if (!hasProof) return '';
+  const attribute = board === 'mane' ? 'data-mane-proof' : 'data-fb-proof';
+  return `
+    <div class="review-proof">
+      <span class="review-proof-status" role="status"></span>
+      <div class="review-proof-image"></div>
+    </div>
+    <div class="review-actions">
+      <button type="button" class="outline-btn" ${attribute}="${esc(id)}">查看截图预览</button>
+      <button type="button" class="text-link-btn" ${attribute}="${esc(id)}" data-proof-size="original">查看原图</button>
+    </div>`;
 }
 
 function openManeExport(status) {
@@ -3771,14 +3887,13 @@ async function openManeAdmin(status = 'pending') {
                 ${row.review_note ? `<br/>备注：${esc(row.review_note)}` : ''}
               </div>
               ${safeLinkHtml(row.related_url)}
+              ${reviewProofHtml('mane', row.id, row.evidence_path)}
               <div class="review-actions">
-                <button class="outline-btn" data-mane-proof="${esc(row.id)}">查看截图</button>
                 <button class="outline-btn" data-mane-edit="${esc(row.id)}">编辑成绩</button>
                 ${status === 'pending' ? '<button class="approve-btn" data-mane-decision="approved">✓ 通过</button><button class="danger-btn" data-mane-decision="rejected">× 拒绝</button>' : ''}
                 ${status === 'approved' ? '<button class="danger-btn" data-mane-decision="removed">撤下</button>' : ''}
                 ${status === 'rejected' ? '<button class="approve-btn" data-action="mane-reopen">退回待审核</button><button class="danger-btn" data-action="mane-delete-rejected">删除</button>' : ''}
               </div>
-              <div class="review-proof" role="status"></div>
             </article>`;
         }).join('')
       : '<div class="empty-state"><h3>暂无符合条件的投稿</h3></div>');
@@ -3880,9 +3995,8 @@ async function openFbAdmin(tab = 'pending', openStage = '') {
                   r.status === 'rejected' ? `<br/>拒绝理由：${esc(r.review_note || '未记录')}` : ''}
               </div>
               ${r.resonance_ten ? resonanceBadge : ''}${safeLinkHtml(r.related_url)}
-              <div id="fb-proof-${esc(r.id)}" class="review-proof" role="status"></div>
+              ${reviewProofHtml('flashback', r.id, r.evidence_path)}
               <div class="review-actions">
-                ${r.evidence_path ? `<button class="outline-btn" data-fb-proof="${esc(r.id)}">查看截图</button>` : ''}
                 ${tab === 'pending' ? `<button class="approve-btn" data-fb-review="approved" data-id="${esc(r.id)}">✓ 审核通过</button><button class="danger-btn" data-fb-review="rejected" data-id="${esc(r.id)}">× 拒绝</button>` : ''}
                 ${tab === 'approved' ? `<button class="danger-btn" data-fb-remove="${esc(r.id)}">移除成绩</button>` : ''}
                 ${tab === 'rejected' ? `<button class="approve-btn" data-fb-reopen="${esc(r.id)}">退回待审核</button>` : ''}
@@ -3990,6 +4104,7 @@ function render() {
 document.addEventListener('click', async (ev) => {
   const btn = ev.target.closest('button, a[data-switch-mode]');
   if (!btn) return;
+  const dialog = btn.closest('.modal-box');
 
   try {
     if (btn.dataset.modeSwitch) {
@@ -4356,12 +4471,8 @@ document.addEventListener('click', async (ev) => {
       return;
     }
     if (action === 'mane-maps-admin') { await openManeMapsAdmin(); return; }
-    if (btn.dataset.maneProof) {
-      const card = btn.closest('.review-card');
-      const box = card?.querySelector('.review-proof');
-      const row = await checked(sb.from('mane_entries').select('evidence_path').eq('id', btn.dataset.maneProof).single());
-      const { signedUrl } = await checked(sb.storage.from('mane-proofs').createSignedUrl(row.evidence_path, 120));
-      if (box) box.innerHTML = `<img class="proof-img" alt="结算截图" src="${esc(signedUrl)}" />`;
+    if (btn.dataset.maneProof || btn.dataset.fbProof) {
+      await showReviewProof(btn);
       return;
     }
     if (btn.dataset.maneEdit) {
@@ -4389,17 +4500,19 @@ document.addEventListener('click', async (ev) => {
           const updated = await checked(sb.from('mane_entries').update({ status: 'rejected', review_note: reason })
             .eq('id', entry).eq('updated_at', revision).select('id'));
           if (!updated.length) throw new Error('该成绩已被其他管理员修改，请重新打开。');
-          await openManeAdmin(status);
-          toast('投稿已拒绝。');
+          await finishReview(dialog, 'mane', status, '投稿已拒绝。', {card});
         });
         return;
       }
       if (dec === 'removed' && !window.confirm('确定撤下这条鬃毛成绩？')) return;
-      const updated = await checked(sb.from('mane_entries').update({ status: dec }).eq('id', entry).eq('updated_at', revision).select('id'));
-      if (!updated.length) throw new Error('该成绩已被其他管理员修改，请重新打开。');
-      await loadAllData();
-      await openManeAdmin(status);
-      toast('审核状态已更新。');
+      btn.disabled = true;
+      try {
+        const updated = await checked(sb.from('mane_entries').update({ status: dec }).eq('id', entry).eq('updated_at', revision).select('id'));
+        if (!updated.length) throw new Error('该成绩已被其他管理员修改，请重新打开。');
+        await finishReview(dialog, 'mane', status, '审核状态已更新。', {card, changedRankings: true});
+      } finally {
+        btn.disabled = false;
+      }
       return;
     }
     if (action === 'mane-reopen') {
@@ -4432,33 +4545,23 @@ document.addEventListener('click', async (ev) => {
     if (btn.dataset.fbAdmin) { await openFbAdmin(btn.dataset.fbAdmin); return; }
     if (action === 'fb-versions-admin') { openFbVersionManager(); return; }
     if (btn.dataset.fbEditVersion !== undefined) { openFbVersionEditor(btn.dataset.fbEditVersion); return; }
-    if (btn.dataset.fbProof) {
-      const id = btn.dataset.fbProof;
-      const box = document.getElementById(`fb-proof-${id}`);
-      if (!box) return;
-      box.textContent = '正在读取截图…';
-      const row = await checked(sb.from('submissions').select('evidence_path').eq('id', id).single());
-      const blob = await checked(sb.storage.from('proofs').download(row.evidence_path));
-      const img = await decodeImageFile(blob);
-      img.alt = '焦点闪回通关截图';
-      img.className = 'proof-img';
-      box.replaceChildren(img);
-      return;
-    }
     if (btn.dataset.fbReview) {
       const approved = btn.dataset.fbReview === 'approved';
+      const card = btn.closest('.review-card');
       if (!approved) {
         showRejectionForm(btn, async (reason) => {
           await checked(sb.rpc('review_submission', { p_submission_id: btn.dataset.id, p_decision: 'rejected', p_note: reason }));
-          await openFbAdmin('pending');
-          toast('投稿已拒绝。');
+          await finishReview(dialog, 'flashback', 'pending', '投稿已拒绝。', {card});
         });
         return;
       }
-      await checked(sb.rpc('review_submission', { p_submission_id: btn.dataset.id, p_decision: btn.dataset.fbReview, p_note: '' }));
-      await loadAllData();
-      await openFbAdmin('pending');
-      toast('审核通过，排行榜已重算。');
+      btn.disabled = true;
+      try {
+        await checked(sb.rpc('review_submission', { p_submission_id: btn.dataset.id, p_decision: btn.dataset.fbReview, p_note: '' }));
+        await finishReview(dialog, 'flashback', 'pending', '审核通过。', {card, changedRankings: true});
+      } finally {
+        btn.disabled = false;
+      }
       return;
     }
     if (btn.dataset.fbReopen) {
@@ -4474,9 +4577,9 @@ document.addEventListener('click', async (ev) => {
       if (note.length < 2 || note.length > 200) return toast('移除原因须为 2–200 字。');
       if (!window.confirm('确认移除这条已通过成绩并重算荣誉？')) return;
       await checked(sb.rpc('remove_submission', { p_submission_id: btn.dataset.fbRemove, p_reason: note }));
-      await loadAllData();
-      await openFbAdmin('approved');
-      toast('成绩已移除，荣誉已重算。');
+      await finishReview(dialog, 'flashback', 'approved', '成绩已移除。', {
+        card: btn.closest('.review-card'), changedRankings: true
+      });
       return;
     }
     if (btn.dataset.fbEdit) {
@@ -4515,6 +4618,12 @@ document.addEventListener('click', async (ev) => {
       const cfg = FB_ARCHIVE_ACTIONS[btn.dataset.fbArchive];
       if (!cfg || !window.confirm(`删除${cfg.label}？删除后会从列表与统计中撤下。`)) return;
       await checked(sb.rpc(cfg.rpc, { [cfg.arg]: btn.dataset.id }));
+      if (btn.dataset.fbArchive === 'fb-archive-record') {
+        await finishReview(dialog, 'flashback', btn.dataset.tab || 'pending', '已删除。', {
+          card: btn.closest('.review-card'), changedRankings: btn.dataset.tab === 'approved'
+        });
+        return;
+      }
       await loadAllData();
       if (btn.dataset.fbArchive === 'fb-archive-version') openFbVersionManager();
       else await openFbAdmin(btn.dataset.fbArchive === 'fb-archive-history' ? 'historical' : (btn.dataset.tab || 'pending'), btn.dataset.stage || '');
@@ -4594,6 +4703,7 @@ document.addEventListener('compositionend', (ev) => {
 
 document.addEventListener('submit', async (ev) => {
   const form = ev.target;
+  const dialog = form.closest('.modal-box');
   if (!form.id) return;
   ev.preventDefault();
   const submitBtn = form.querySelector('[type="submit"]');
@@ -4617,9 +4727,9 @@ document.addEventListener('submit', async (ev) => {
         throw err;
       }
       if (!updated.length) throw new Error('成绩已被其他管理员更新，请重新打开。');
-      await loadAllData();
-      await openManeAdmin(form.dataset.status);
-      toast('鬃毛成绩已保存。');
+      await finishReview(dialog, 'mane', form.dataset.status, '鬃毛成绩已保存。', {
+        changedRankings: form.dataset.status === 'approved'
+      });
     } else if (form.id === 'maneMapForm' && state.isAdmin) {
       const fd = new FormData(form);
       await checked(sb.from('mane_maps').insert({
@@ -4683,9 +4793,9 @@ document.addEventListener('submit', async (ev) => {
           throw err;
         }
       }
-      await loadAllData();
-      await openFbAdmin(form.dataset.tab);
-      toast('焦点闪回成绩已保存。');
+      await finishReview(dialog, 'flashback', form.dataset.tab, '焦点闪回成绩已保存。', {
+        changedRankings: form.dataset.tab === 'approved'
+      });
     } else if (form.id === 'fbVersionForm' && state.isAdmin) {
       const fd = new FormData(form);
       const code = String(fd.get('code') || '').trim();
