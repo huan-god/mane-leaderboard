@@ -3312,6 +3312,97 @@ function fbStageOptionsHtml(versionId) {
     .join('');
 }
 
+function bindFlashbackScreenshot(form) {
+  const proof = form.elements.namedItem('proof');
+  const stage = form.elements.namedItem('stage');
+  const rounds = form.elements.namedItem('rounds');
+  const version = form.elements.namedItem('version');
+  const note = form.querySelector('#fbScreenshotStatus');
+  let request = 0;
+  let stageEdited = false;
+  let roundsEdited = false;
+  let undoPrefill = [];
+
+  stage.addEventListener('change', () => {
+    stageEdited = true;
+    delete form.dataset.ocrStageNumber;
+  });
+  rounds.addEventListener('change', () => { roundsEdited = true; });
+
+  proof.addEventListener('change', async () => {
+    const current = ++request;
+    undoPrefill.reverse().forEach((undo) => undo());
+    undoPrefill = [];
+    refreshBuildSlotsGrid();
+    const file = proof.files[0];
+    note.textContent = '';
+    if (!file?.size || !MIME_TO_EXT[file.type] || file.size > 5 * 1024 * 1024) return;
+    note.textContent = '正在识别通关截图…';
+    try {
+      const { recognizeFlashbackScreenshot } = await import('./flashback-screenshot.js?v=20261123-flash-proof');
+      const result = await recognizeFlashbackScreenshot(file);
+      if (!form.isConnected || current !== request) return;
+      if (!result) {
+        note.textContent = '暂未识别这张图的通关画面，请手动填写。';
+        return;
+      }
+
+      const detectedStage = standardStages(version.value).find((entry) => entry.stage_no === result.stage);
+      if (detectedStage && !stageEdited) {
+        const previous = stage.value;
+        stage.value = detectedStage.id;
+        form.dataset.ocrStageNumber = String(detectedStage.stage_no);
+        undoPrefill.push(() => {
+          if (stageEdited) return;
+          delete form.dataset.ocrStageNumber;
+          if ([...stage.options].some((option) => option.value === previous)) stage.value = previous;
+          else stage.selectedIndex = 0;
+        });
+      }
+      if (result.rounds !== null && !roundsEdited) {
+        rounds.value = String(result.rounds);
+        undoPrefill.push(() => {
+          if (!roundsEdited) rounds.value = '';
+        });
+      }
+
+      let filledChars = 0;
+      let filledPsychubes = 0;
+      for (const [slot, { character, psychube }] of result.slots.entries()) {
+        if (!character) continue;
+        const elsewhere = modalBuildState.chars.some((value) => splitSlotChoices(value).some(
+          (name) => canonicalCharacterKey(name) === canonicalCharacterKey(character)
+        ));
+        if (!modalBuildState.chars[slot] && !elsewhere) {
+          modalBuildState.chars[slot] = character;
+          filledChars++;
+          undoPrefill.push(() => {
+            if (modalBuildState.chars[slot] === character && !modalBuildState.carries[slot] &&
+                !modalBuildState.psychubes[slot] && !modalBuildState.resonanceCodes[slot]) {
+              modalBuildState.chars[slot] = '';
+            }
+          });
+        }
+        if (psychube && modalBuildState.chars[slot] === character && !modalBuildState.psychubes[slot]) {
+          modalBuildState.psychubes[slot] = psychube;
+          filledPsychubes++;
+          undoPrefill.push(() => {
+            if (modalBuildState.chars[slot] === character && modalBuildState.psychubes[slot] === psychube) {
+              modalBuildState.psychubes[slot] = '';
+            }
+          });
+        }
+      }
+      if (filledChars || filledPsychubes) refreshBuildSlotsGrid();
+      const stageLabel = detectedStage ? `第${detectedStage.stage_no}关` : '关卡待确认';
+      const roundLabel = result.rounds === null ? '回合待确认' : `${result.rounds} 回合`;
+      note.textContent = `识别结果：${stageLabel} · ${roundLabel}。已预填 ${filledChars} 个角色、${filledPsychubes} 个心相，请核对并补填其余信息。`;
+    } catch {
+      if (form.isConnected && current === request) note.textContent = '暂时无法识别这张截图，请手动填写。';
+    }
+  });
+}
+
 function openFbSubmitModal() {
   if (!state.connected || !state.fbStages.length || startingGuest) return;
   if (!state.user) {
@@ -3339,8 +3430,19 @@ function openFbSubmitModal() {
   openModal(`
     <div class="modal-eyebrow">FLASHBACK ARCHIVE · SUBMIT</div>
     <h2>提交焦点闪回成绩</h2>
-    <p class="modal-subtitle">仅收录 0–6 回合有效成绩；点击选框填入 1–4 名角色并勾选主 C，心相与共鸣码选填。</p>
+    <div class="modal-subtitle">
+      <span class="resonance-tag">✦ 已支持图像识别</span>
+      <small class="field-hint" style="display:block;margin-top:6px">
+        选择通关截图可预填识别到的关卡、回合和部分角色、心相。仅收录 0–6 回合有效成绩，请核对后补填，确认期次和塑造，并勾选主 C。
+      </small>
+    </div>
     <form id="fbSubmitForm">
+      <div class="field">
+        <label for="fbFormProof">通关截图 *</label>
+        <input id="fbFormProof" name="proof" type="file" accept="image/png,image/jpeg,image/webp" required />
+        <span class="field-hint">PNG / JPG / WebP，最大 5 MB，仅本人及管理员可见。</span>
+        <span class="field-hint" id="fbScreenshotStatus" role="status"></span>
+      </div>
       <div class="form-grid">
         <div class="field"><label for="fbNick">玩家昵称 *</label><input id="fbNick" name="nickname" readonly value="${esc(state.profile.display_name)}" /></div>
         <div class="field"><label for="fbFormVersion">游戏版本 *</label><select id="fbFormVersion" name="version">${optionsHtml(state.fbVersions.map((v) => [v.id, v.label]), state.fbVersionId)}</select></div>
@@ -3349,14 +3451,9 @@ function openFbSubmitModal() {
         <div class="field"><label for="fbFormStage">挑战关卡 *</label><select id="fbFormStage" name="stage">${fbStageOptionsHtml(state.fbVersionId)}</select></div>
         <div class="field"><label for="fbFormGroup">塑造分组 *</label><select id="fbFormGroup" name="group">${optionsHtml(Object.entries(DIVISIONS), state.fbGroup)}</select></div>
       </div>
-      <div class="field"><label for="fbFormRounds">通关回合 *</label><select id="fbFormRounds" name="rounds">${Array.from({ length: 7 }, (_, n) => `<option value="${n}">${n} 回合</option>`).join('')}</select></div>
+      <div class="field"><label for="fbFormRounds">通关回合 *</label><select id="fbFormRounds" name="rounds" required><option value="">请选择回合数</option>${Array.from({ length: 7 }, (_, n) => `<option value="${n}">${n} 回合</option>`).join('')}</select></div>
       ${resonanceChoice(state.fbGroup)}
       ${renderTeamBuilderFieldHtml()}
-      <div class="field">
-        <label for="fbFormProof">通关截图 *</label>
-        <input id="fbFormProof" name="proof" type="file" accept="image/png,image/jpeg,image/webp" required />
-        <span class="field-hint">PNG / JPG / WebP，最大 5 MB，仅本人及管理员可见。</span>
-      </div>
       <div class="field">
         <label for="fbFormLink">相关链接（选填）</label>
         <input id="fbFormLink" name="relatedUrl" type="url" maxlength="2048" placeholder="https://" />
@@ -3367,19 +3464,21 @@ function openFbSubmitModal() {
         <button type="submit" class="copper-btn">确认提交 →</button>
       </div>
     </form>`, true);
+  bindFlashbackScreenshot($('#fbSubmitForm'));
 }
 
 async function handleFbSubmit(form) {
   const fd = new FormData(form);
   const nickname = String(fd.get('nickname') ?? '').trim();
-  const rounds = Number(fd.get('rounds'));
+  const roundValue = String(fd.get('rounds') ?? '');
+  const rounds = Number(roundValue);
   const file = fd.get('proof');
   const versionId = String(fd.get('version'));
   const stageId = String(fd.get('stage'));
   const group_code = String(fd.get('group'));
 
   if (nickname.length < 2 || nickname.length > 24) throw new Error('玩家昵称需在 2–24 个字符之间。');
-  if (!Number.isInteger(rounds) || rounds < 0 || rounds > 6) throw new Error('通关回合数必须在 0–6 之间。');
+  if (!/^[0-6]$/.test(roundValue)) throw new Error('请选择 0–6 之间的通关回合数。');
   if (!file?.size || !MIME_TO_EXT[file.type] || file.size > 5 * 1024 * 1024) {
     throw new Error('请上传不超过 5 MB 的 PNG、JPG 或 WebP 通关截图。');
   }
@@ -4426,7 +4525,12 @@ document.addEventListener('change', (ev) => {
   else if (t.id === 'fbCarrySelect') { state.fbCarry = t.value; render(); }
   else if (t.id === 'fbFormVersion') {
     const sel = $('#fbFormStage');
-    if (sel) sel.innerHTML = fbStageOptionsHtml(t.value);
+    if (sel) {
+      sel.innerHTML = fbStageOptionsHtml(t.value);
+      const detectedNo = Number(t.form?.dataset.ocrStageNumber);
+      const detectedStage = standardStages(t.value).find((stage) => stage.stage_no === detectedNo);
+      if (detectedStage) sel.value = detectedStage.id;
+    }
   }
   else if (t.id === 'fbFormGroup' || t.id === 'feGroup') {
     const box = t.form?.querySelector('.resonance-choice');
