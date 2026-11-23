@@ -29,7 +29,12 @@ import {
 } from './psychubes.js';
 import {
   adminContact,
+  bindModerationFilters,
   contactField,
+  filterModerationRows,
+  moderationFilterFields,
+  moderationPager,
+  moderationPageSize,
   mountSubmissionProgress,
   showRejectionForm
 } from './submission-progress.js';
@@ -3293,6 +3298,44 @@ function renderAdminBuildSummaryHtml(row) {
   return items.length ? `<br/>配装：${items.join(' ｜ ')}` : '';
 }
 
+const adminFilters = {
+  mane: {tab: '', name: '', location: '', division: '', page: 0},
+  flashback: {tab: '', name: '', location: '', division: '', page: 0}
+};
+
+async function renderFilteredAdmin(list, mode, tab, locationLabel, groups, fetchRows, renderRows) {
+  if (!list?.isConnected) return;
+  const filters = adminFilters[mode];
+  if (filters.tab !== tab) {
+    filters.tab = tab;
+    filters.page = 0;
+  }
+  if (!groups.some(([, items]) => items.some(([id]) => id === filters.location))) {
+    filters.location = '';
+  }
+  list.insertAdjacentHTML('beforebegin', moderationFilterFields(filters, locationLabel, groups));
+
+  let request = 0;
+  async function load() {
+    const current = ++request;
+    list.textContent = '正在读取投稿…';
+    try {
+      const rows = await fetchRows(filters);
+      if (!list.isConnected || current !== request) return;
+      if (!rows.length && filters.page > 0) {
+        filters.page--;
+        return load();
+      }
+      list.innerHTML = renderRows(rows.slice(0, moderationPageSize)) +
+        moderationPager(filters.page, rows.length > moderationPageSize);
+    } catch (error) {
+      if (list.isConnected && current === request) list.textContent = `读取失败：${error.message}`;
+    }
+  }
+  bindModerationFilters(list.previousElementSibling, list, filters, load);
+  await load();
+}
+
 async function openManeAdmin(status = 'pending') {
   if (!state.isAdmin) return toast('仅管理员可访问审核后台。');
   openModal(`
@@ -3309,18 +3352,24 @@ async function openManeAdmin(status = 'pending') {
 
   const list = $('#adminList');
   try {
-    const rows = await checked(
+    const maps = await checked(sb.from('mane_maps').select('id,name,section,edition,active')
+      .order('edition', {ascending: false}).order('position'));
+    const groups = new Map();
+    for (const map of maps) {
+      const label = `${map.edition} · ${MANE_SECTIONS[map.section]}`;
+      if (!groups.has(label)) groups.set(label, []);
+      groups.get(label).push([map.id, map.active ? map.name : `${map.name}（隐藏）`]);
+    }
+    const fetchRows = (filters) => checked(filterModerationRows(
       sb.from('mane_entries')
         .select('*')
         .eq('status', status)
-        .is('archived_at', null)
-        .order('created_at', { ascending: false })
-        .limit(200)
-    );
-    if (!list?.isConnected) return;
-    list.innerHTML = rows.length
+        .is('archived_at', null),
+      filters, 'map_id', 'division'
+    ));
+    await renderFilteredAdmin(list, 'mane', status, '地图', [...groups], fetchRows, (rows) => rows.length
       ? rows.map((row) => {
-          const map = state.maneMaps.find((m) => m.id === row.map_id);
+          const map = maps.find((m) => m.id === row.map_id);
           return `
             <article class="review-card" data-entry="${esc(row.id)}" data-revision="${esc(row.updated_at)}" data-status="${esc(status)}">
               <div class="review-top">
@@ -3344,7 +3393,7 @@ async function openManeAdmin(status = 'pending') {
               <div class="review-proof" role="status"></div>
             </article>`;
         }).join('')
-      : `<div class="empty-state"><h3>${STATUS_LABELS[status]} 列表为空</h3></div>`;
+      : '<div class="empty-state"><h3>暂无符合条件的投稿</h3></div>');
   } catch (err) {
     if (list?.isConnected) list.innerHTML = `<p class="modal-subtitle">读取失败：${esc(err.message)}</p>`;
   }
@@ -3410,17 +3459,23 @@ async function openFbAdmin(tab = 'pending', openStage = '') {
   }
 
   try {
-    const rows = await checked(
-      sb.from('submissions')
-        .select('*,profiles(display_name)')
-        .eq('status', tab)
-        .order('created_at', { ascending: false })
-        .limit(250)
-    );
-    if (!list?.isConnected) return;
-    list.innerHTML = rows.length
+    const groups = state.fbVersions.map((v) =>
+      [v.label, standardStages(v.id).map((stage) => [stage.id, stage.name])]);
+    const fetchRows = async (filters) => {
+      const rows = await checked(filterModerationRows(
+        sb.from('flashback_moderation_list').select('*').eq('status', tab),
+        filters, 'stage_id', 'group_code'
+      ));
+      if (!rows.length) return rows;
+
+      const builds = await checked(sb.from('submissions').select('id,team_psychubes,team_resonance_codes')
+        .in('id', rows.slice(0, moderationPageSize).map((row) => row.id)));
+      const buildsById = new Map(builds.map((build) => [build.id, build]));
+      return rows.map((row) => ({...row, ...buildsById.get(row.id)}));
+    };
+    await renderFilteredAdmin(list, 'flashback', tab, '关卡', groups, fetchRows, (rows) => rows.length
       ? rows.map((r) => {
-          const name = r.credited_player || r.profiles?.display_name || '未知玩家';
+          const name = r.display_name;
           const st = state.fbStages.find((s) => s.id === r.stage_id);
           const v = state.fbVersions.find((x) => x.id === st?.version_id);
           return `
@@ -3448,7 +3503,7 @@ async function openFbAdmin(tab = 'pending', openStage = '') {
               </div>
             </article>`;
         }).join('')
-      : `<div class="empty-state"><h3>${FB_ADMIN_TABS[tab]} 列表为空</h3></div>`;
+      : '<div class="empty-state"><h3>暂无符合条件的投稿</h3></div>');
   } catch (err) {
     if (list?.isConnected) list.innerHTML = `<p class="modal-subtitle">读取失败：${esc(err.message)}</p>`;
   }
