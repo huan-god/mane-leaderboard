@@ -159,8 +159,14 @@ const charPickerState = {
   slotIndex: 0,
   aff: 'all',
   star: 'all',
-  query: ''
+  query: '',
+  choices: []
 };
+
+const ANY_SLOT_CHOICES = ['任意生存', '任意角色', '任意拐位'];
+const isAnySlotChoice = (name) => ANY_SLOT_CHOICES.includes(name);
+const splitSlotChoices = (value) => String(value || '').split(/[/／]/).map((name) => name.trim()).filter(Boolean);
+const canMarkSlotCarry = (name) => Boolean(name) && !isAnySlotChoice(name) && splitSlotChoices(name).length === 1;
 
 const psyPickerState = {
   open: false,
@@ -200,9 +206,10 @@ function resetModalBuildState(team = [], carryStr = '', psychubes = [], resonanc
   const rArr = normalizeStringSlots(resonanceCodes);
   for (let i = 0; i < 4; i++) {
     const rawChar = String(tArr[i] ?? '').trim();
-    const resolved = rawChar ? resolveCharacter(rawChar) : null;
-    modalBuildState.chars[i] = resolved ? resolved.name : rawChar;
-    modalBuildState.carries[i] = Boolean(rawChar && carryKeys.has(canonicalCharacterKey(rawChar)));
+    const choices = splitSlotChoices(rawChar);
+    const slot = choices.map((name) => isAnySlotChoice(name) ? name : (resolveCharacter(name)?.name || name)).join('/');
+    modalBuildState.chars[i] = slot;
+    modalBuildState.carries[i] = canMarkSlotCarry(slot) && carryKeys.has(canonicalCharacterKey(slot));
     modalBuildState.psychubes[i] = pArr[i] || '';
     modalBuildState.resonanceCodes[i] = rArr[i] || '';
   }
@@ -225,15 +232,15 @@ function readTeamBuilderSubmission() {
       }
       continue;
     }
-    if (rawChar.length > 40) throw new Error('单个角色名长度不能超过 40 字。');
-    const cKey = canonicalCharacterKey(rawChar);
-    if (seenKeys.has(cKey)) {
-      throw new Error(`上阵阵容中包含重复角色「${rawChar}」，请移除重复项。`);
+    if (Array.from(rawChar).length > 40) throw new Error('每个位置的角色名称合计最多 40 字。');
+    for (const name of splitSlotChoices(rawChar)) {
+      const key = canonicalCharacterKey(name);
+      if (seenKeys.has(key)) throw new Error(`上阵阵容中包含重复项「${name}」，请移除重复项。`);
+      seenKeys.add(key);
     }
     if (res.length > 160) throw new Error('单个角色的共鸣码长度不能超过 160 个字符。');
-    seenKeys.add(cKey);
     team.push(rawChar);
-    if (modalBuildState.carries[i]) carries.push(rawChar);
+    if (modalBuildState.carries[i] && canMarkSlotCarry(rawChar)) carries.push(rawChar);
     psychubes.push(psy);
     resonanceCodes.push(res);
   }
@@ -290,9 +297,10 @@ function renderCharPickerThumbHtml(char) {
 
 function renderBuildSlotItemHtml(idx) {
   const rawChar = String(modalBuildState.chars[idx] || '').trim();
-  const resolvedChar = rawChar ? resolveCharacter(rawChar) : null;
+  const canCarry = canMarkSlotCarry(rawChar);
+  const resolvedChar = canCarry ? resolveCharacter(rawChar) : null;
   const charLabel = resolvedChar?.name || rawChar;
-  const isCarry = Boolean(rawChar && modalBuildState.carries[idx]);
+  const isCarry = canCarry && modalBuildState.carries[idx];
   const psyVal = modalBuildState.psychubes[idx] || '';
   const psy = psyVal ? resolvePsychube(psyVal) : null;
   const psyDisplay = psy?.name || psyVal;
@@ -306,7 +314,7 @@ function renderBuildSlotItemHtml(idx) {
           <span class="build-slot-index">${idx + 1}号位</span>
           <span class="build-slot-char">${esc(charLabel || '待选择角色')}</span>
         </div>
-        <button type="button" class="carry-check-btn ${isCarry ? 'checked' : ''}" data-toggle-carry="${idx}" role="checkbox" aria-checked="${isCarry}" ${rawChar ? '' : 'disabled'} title="${rawChar ? '勾选/取消作为本场主 C（支持共同主 C）' : '先选角色后可勾选主 C'}">
+        <button type="button" class="carry-check-btn ${isCarry ? 'checked' : ''}" data-toggle-carry="${idx}" role="checkbox" aria-checked="${isCarry}" ${canCarry ? '' : 'disabled'} title="${canCarry ? '勾选或取消主 C（支持共同主 C）' : '主 C 需选明确的单名角色'}">
           <span class="carry-check-box" aria-hidden="true">${isCarry ? '✓' : ''}</span>
           <span>主 C</span>
         </button>
@@ -376,22 +384,36 @@ function refreshBuildSlotsGrid() {
   if (summary) summary.textContent = renderTeamBuilderSummaryText();
 }
 
-function renderCharPicker() {
-  const root = $('#charPickerRoot');
-  if (!root) return;
-  if (!charPickerState.open) {
-    root.innerHTML = '';
-    return;
-  }
-
-  const q = normKey(charPickerState.query);
-  const usedInOtherSlots = new Map();
+function charactersInOtherSlots() {
+  const used = new Map();
   for (let i = 0; i < 4; i++) {
     if (i === charPickerState.slotIndex) continue;
-    const ch = String(modalBuildState.chars[i] || '').trim();
-    if (ch) usedInOtherSlots.set(canonicalCharacterKey(ch), i + 1);
+    for (const name of splitSlotChoices(modalBuildState.chars[i])) used.set(canonicalCharacterKey(name), i + 1);
   }
+  return used;
+}
 
+function syncCharPickerSelection() {
+  const overlay = $('#charPickerOverlay');
+  if (!overlay) return;
+  const choices = charPickerState.choices;
+  const selected = new Set(choices.map(canonicalCharacterKey));
+  overlay.querySelectorAll('[data-choose-char]').forEach((button) => {
+    const pressed = selected.has(canonicalCharacterKey(button.dataset.chooseChar));
+    button.classList.toggle('is-selected', pressed && button.classList.contains('char-card-option'));
+    button.classList.toggle('active', pressed && button.classList.contains('psy-chip'));
+    button.setAttribute('aria-pressed', String(pressed));
+  });
+  const summary = $('#charPickerSelection');
+  summary.textContent = choices.length ? choices.join(' / ') : '请选择角色或任意位';
+  $('#confirmCharSelection').disabled = choices.length === 0;
+}
+
+function refreshCharPickerResults() {
+  const grid = $('#charPickerGrid');
+  if (!grid) return;
+  const q = normKey(charPickerState.query);
+  const usedInOtherSlots = charactersInOtherSlots();
   const filtered = CHARACTER_LIST.filter((c) => {
     if (charPickerState.aff !== 'all') {
       const okAff = c.aff === charPickerState.aff ||
@@ -404,8 +426,36 @@ function renderCharPicker() {
     if (!q) return true;
     return characterMatchesQuery(c.name, q);
   });
+  grid.innerHTML = filtered.length
+    ? filtered.map((c) => {
+        const usedSlot = usedInOtherSlots.get(`char:${c.id}`);
+        return `
+          <button type="button" class="char-card-option ${usedSlot ? 'is-used' : ''}" data-choose-char="${esc(c.name)}" ${usedSlot ? 'disabled' : ''} title="${esc(c.name)}（${c.star}★${usedSlot ? ` · 已在 ${usedSlot} 号位` : ''}）">
+            ${renderCharPickerThumbHtml(c)}
+            <span class="char-opt-name">${esc(c.name)}</span>
+            <span class="char-opt-meta">${usedSlot ? `已在 ${usedSlot} 号位` : `${c.star}★ · ${(AFFLATUS_META[c.aff]?.label || '')}`}</span>
+          </button>`;
+      }).join('')
+    : '<div class="empty-state" style="grid-column:1/-1;padding:12px"><p>没有匹配的角色，可在下方手动填入。</p></div>';
+  grid.scrollTop = 0;
+  $('#charPickerOverlay').querySelectorAll('[data-char-aff], [data-char-star]').forEach((button) => {
+    const active = button.dataset.charAff === charPickerState.aff || button.dataset.charStar === charPickerState.star;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+  syncCharPickerSelection();
+}
 
+function renderCharPicker() {
+  const root = $('#charPickerRoot');
+  if (!root) return;
+  if (!charPickerState.open) {
+    root.innerHTML = '';
+    return;
+  }
   const currentVal = modalBuildState.chars[charPickerState.slotIndex] || '';
+  const customVal = splitSlotChoices(currentVal).some((name) => !isAnySlotChoice(name) && !resolveCharacter(name))
+    ? currentVal : '';
 
   root.innerHTML = `
     <div class="psy-picker-overlay" id="charPickerOverlay">
@@ -434,30 +484,25 @@ function renderCharPicker() {
           </div>
           <div class="search-input-wrap">
             <img class="search-input-icon" src="./assets/uttu/btn_search.webp" alt="" aria-hidden="true" />
-            <input id="charPickerSearch" class="filter-input has-icon" type="search" placeholder="搜索角色名、英文名或简称（如 哨歌 / 纸信 / 瑞 / J）…" value="${esc(charPickerState.query)}" />
+            <input id="charPickerSearch" class="filter-input has-icon" type="search" aria-label="搜索角色" placeholder="搜索角色名、英文名或简称…" value="${esc(charPickerState.query)}" />
           </div>
         </div>
-        <div class="char-picker-grid">
-          ${filtered.length
-            ? filtered.map((c) => {
-                const usedSlot = usedInOtherSlots.get(`char:${c.id}`);
-                const isSelected = canonicalCharacterKey(currentVal) === `char:${c.id}`;
-                return `
-                  <button type="button" class="char-card-option ${isSelected ? 'is-selected' : ''} ${usedSlot ? 'is-used' : ''}" data-choose-char="${esc(c.name)}" ${usedSlot ? 'disabled' : ''} title="${esc(c.name)}（${c.star}★${usedSlot ? ` · 已在 ${usedSlot} 号位` : ''}）">
-                    ${renderCharPickerThumbHtml(c)}
-                    <span class="char-opt-name">${esc(c.name)}</span>
-                    <span class="char-opt-meta">${usedSlot ? `已在 ${usedSlot} 号位` : `${c.star}★ · ${(AFFLATUS_META[c.aff]?.label || '')}`}</span>
-                  </button>`;
-              }).join('')
-            : '<div class="empty-state" style="grid-column:1/-1;padding:28px 12px"><p>没有匹配的角色，可尝试清空筛选或在下方手动填入。</p></div>'
-          }
+        <div class="psy-chip-group" role="group" aria-label="任意位">
+          ${ANY_SLOT_CHOICES.map((name) => `<button type="button" class="psy-chip" data-choose-char="${name}">${name}</button>`).join('')}
         </div>
+        <div id="charPickerGrid" class="char-picker-grid" style="min-height:0;flex:1 1 auto"></div>
+        <div class="char-custom-row" style="align-items:center">
+          <small id="charPickerSelection" class="field-hint" role="status" style="flex:1;min-width:0;overflow-wrap:anywhere"></small>
+          <button id="confirmCharSelection" type="button" class="copper-btn" data-action="confirm-char-selection">确认选择</button>
+        </div>
+        <small class="field-hint">同一位置可勾选多个备选角色，也可以选一个任意位。</small>
         <div class="char-custom-row">
-          <input id="charCustomInput" type="text" maxlength="40" placeholder="未收录新角色或特殊写法可在此手动输入后确认…" value="${esc(!resolveCharacter(currentVal) ? currentVal : '')}" />
-          <button type="button" class="outline-btn" data-action="apply-custom-char">确认填入</button>
+          <input id="charCustomInput" type="text" maxlength="40" aria-label="手动填写角色" placeholder="手动填入角色，备选用 / 隔开" value="${esc(customVal)}" />
+          <button type="button" class="outline-btn" data-action="apply-custom-char">手动填入</button>
         </div>
       </section>
     </div>`;
+  refreshCharPickerResults();
 }
 
 function openCharPicker(slotIndex) {
@@ -466,6 +511,7 @@ function openCharPicker(slotIndex) {
   charPickerState.aff = 'all';
   charPickerState.star = 'all';
   charPickerState.query = '';
+  charPickerState.choices = splitSlotChoices(modalBuildState.chars[slotIndex]);
   renderCharPicker();
   requestAnimationFrame(() => $('#charPickerSearch')?.focus());
 }
@@ -473,6 +519,44 @@ function openCharPicker(slotIndex) {
 function closeCharPicker() {
   charPickerState.open = false;
   renderCharPicker();
+}
+
+function chooseCharacterForSlot(name) {
+  const key = canonicalCharacterKey(name);
+  const choices = charPickerState.choices;
+  if (choices.some((selected) => canonicalCharacterKey(selected) === key)) {
+    charPickerState.choices = choices.filter((selected) => canonicalCharacterKey(selected) !== key);
+  } else if (isAnySlotChoice(name)) {
+    charPickerState.choices = [name];
+  } else {
+    charPickerState.choices = [...choices.filter((selected) => !isAnySlotChoice(selected)), name];
+  }
+  syncCharPickerSelection();
+}
+
+function commitCharPickerChoices(choices) {
+  const names = choices.map((name) => isAnySlotChoice(name) ? name : (resolveCharacter(name)?.name || name));
+  const slot = names.join('/');
+  if (!names.length || names.some((name) => !name) || Array.from(slot).length > 40) {
+    throw new Error('请填写有效角色，单个位置合计最多 40 字。');
+  }
+  if (names.length > 1 && names.some(isAnySlotChoice)) throw new Error('任意位需单独选择。');
+  const keys = names.map(canonicalCharacterKey);
+  if (new Set(keys).size !== keys.length) throw new Error('请选择不同的备选角色。');
+  const used = charactersInOtherSlots();
+  for (const key of keys) {
+    if (used.has(key)) throw new Error(`「${names[keys.indexOf(key)]}」已在 ${used.get(key)} 号位。`);
+  }
+  const index = charPickerState.slotIndex;
+  const flashbackForm = $('#fbSubmitForm, #fbEditForm');
+  if (flashbackForm) {
+    const proposedTeam = modalBuildState.chars.map((value, i) => i === index ? slot : value).filter(Boolean);
+    validateLineup(proposedTeam);
+  }
+  modalBuildState.chars[index] = slot;
+  if (!canMarkSlotCarry(slot)) modalBuildState.carries[index] = false;
+  refreshBuildSlotsGrid();
+  closeCharPicker();
 }
 
 function renderPsychubePicker() {
@@ -4016,7 +4100,7 @@ document.addEventListener('click', async (ev) => {
     // 统一阵容方框选择器 & 主 C 勾选 & 心相方框选择器
     if (btn.dataset.toggleCarry !== undefined) {
       const idx = Number(btn.dataset.toggleCarry);
-      if (modalBuildState.chars[idx]) {
+      if (canMarkSlotCarry(modalBuildState.chars[idx])) {
         modalBuildState.carries[idx] = !modalBuildState.carries[idx];
         refreshBuildSlotsGrid();
       }
@@ -4035,18 +4119,16 @@ document.addEventListener('click', async (ev) => {
     }
     if (btn.dataset.charAff !== undefined) {
       charPickerState.aff = btn.dataset.charAff;
-      renderCharPicker();
+      refreshCharPickerResults();
       return;
     }
     if (btn.dataset.charStar !== undefined) {
       charPickerState.star = btn.dataset.charStar;
-      renderCharPicker();
+      refreshCharPickerResults();
       return;
     }
     if (btn.dataset.chooseChar !== undefined) {
-      modalBuildState.chars[charPickerState.slotIndex] = btn.dataset.chooseChar;
-      refreshBuildSlotsGrid();
-      closeCharPicker();
+      if (charPickerState.open) chooseCharacterForSlot(btn.dataset.chooseChar);
       return;
     }
     if (btn.dataset.pickPsy !== undefined) {
@@ -4109,11 +4191,12 @@ document.addEventListener('click', async (ev) => {
       return;
     }
     if (action === 'apply-custom-char') {
-      const val = String($('#charCustomInput')?.value || '').trim();
-      if (!val || val.length > 40) return toast('请输入 1–40 字的有效角色名。');
-      modalBuildState.chars[charPickerState.slotIndex] = val;
-      refreshBuildSlotsGrid();
-      closeCharPicker();
+      const names = $('#charCustomInput').value.split(/[/／]/).map((name) => name.trim());
+      commitCharPickerChoices(names);
+      return;
+    }
+    if (action === 'confirm-char-selection') {
+      commitCharPickerChoices(charPickerState.choices);
       return;
     }
     if (action === 'close-char-picker') { closeCharPicker(); return; }
@@ -4371,17 +4454,24 @@ document.addEventListener('input', (ev) => {
   } else if (t.dataset?.resSlot !== undefined) {
     modalBuildState.resonanceCodes[Number(t.dataset.resSlot)] = t.value;
   } else if (t.id === 'charPickerSearch') {
-    const pos = t.selectionStart;
-    charPickerState.query = t.value;
-    renderCharPicker();
-    const el = $('#charPickerSearch');
-    if (el) { el.focus(); el.setSelectionRange(pos, pos); }
+    if (!ev.isComposing && charPickerState.query !== t.value) {
+      charPickerState.query = t.value;
+      refreshCharPickerResults();
+    }
   } else if (t.id === 'psyPickerSearch') {
     const pos = t.selectionStart;
     psyPickerState.query = t.value;
     renderPsychubePicker();
     const el = $('#psyPickerSearch');
     if (el) { el.focus(); el.setSelectionRange(pos, pos); }
+  }
+});
+
+document.addEventListener('compositionend', (ev) => {
+  const input = ev.target;
+  if (input.id === 'charPickerSearch' && charPickerState.query !== input.value) {
+    charPickerState.query = input.value;
+    refreshCharPickerResults();
   }
 });
 
@@ -4515,7 +4605,7 @@ document.addEventListener('submit', async (ev) => {
 });
 
 document.addEventListener('keydown', (ev) => {
-  if (ev.key === 'Escape') {
+  if (ev.key === 'Escape' && !ev.isComposing) {
     if (charPickerState.open) closeCharPicker();
     else if (psyPickerState.open) closePsychubePicker();
     else closeModal();
