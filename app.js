@@ -3028,6 +3028,80 @@ function readManeFields(fd) {
   return res;
 }
 
+function bindManeScreenshot(form, maps) {
+  const proof = form.querySelector('#mProof');
+  const note = form.querySelector('#mScreenshotStatus');
+  const mapField = form.elements.namedItem('map_id');
+  const scoreField = form.elements.namedItem('score');
+  let mapEdited = false;
+  let request = 0;
+  let undoPrefill = [];
+  mapField.addEventListener('change', () => { mapEdited = true; });
+  proof.addEventListener('change', async () => {
+    const current = ++request;
+    undoPrefill.reverse().forEach((undo) => undo());
+    undoPrefill = [];
+    refreshBuildSlotsGrid();
+
+    const file = proof.files[0];
+    if (!file || !MIME_TO_EXT[file.type] || file.size > 5 * 1024 * 1024) {
+      note.textContent = '';
+      return;
+    }
+    note.textContent = '正在识别结算截图…';
+    try {
+      const { recognizeManeScreenshot } = await import('./mane-screenshot.js?v=20261123-readout');
+      const result = await recognizeManeScreenshot(file);
+      if (!form.isConnected || request !== current) return;
+      if (!result) {
+        note.textContent = '这张图的结算版式或关卡未识别，请手动填写。';
+        return;
+      }
+
+      const match = maps.find((map) => map.name.replace('饥谨', '饥馑') === result.mapName);
+      if (match && !mapEdited) {
+        const previous = mapField.value;
+        mapField.value = match.id;
+        undoPrefill.push(() => {
+          if (!mapEdited && mapField.value === match.id) mapField.value = previous;
+        });
+      }
+      if (result.score && !scoreField.value) {
+        scoreField.value = result.score;
+        undoPrefill.push(() => {
+          if (scoreField.value === result.score) scoreField.value = '';
+        });
+      }
+      for (const [i, { character, psychube }] of result.slots.entries()) {
+        if (!character) continue;
+        if (!modalBuildState.chars[i] && !modalBuildState.chars.includes(character)) {
+          modalBuildState.chars[i] = character;
+          undoPrefill.push(() => {
+            if (modalBuildState.chars[i] === character &&
+              !modalBuildState.carries[i] && !modalBuildState.psychubes[i] && !modalBuildState.resonanceCodes[i]) {
+              modalBuildState.chars[i] = '';
+            }
+          });
+        }
+        if (psychube && modalBuildState.chars[i] === character && !modalBuildState.psychubes[i]) {
+          modalBuildState.psychubes[i] = psychube;
+          undoPrefill.push(() => {
+            if (modalBuildState.chars[i] === character && modalBuildState.psychubes[i] === psychube) {
+              modalBuildState.psychubes[i] = '';
+            }
+          });
+        }
+      }
+      refreshBuildSlotsGrid();
+      const identifiedSlots = result.slots.filter((slot) => slot.character).length;
+      const identifiedPsychubes = result.slots.filter((slot) => slot.psychube).length;
+      note.textContent = `识别结果：${result.mapName} · ${result.score ? Number(result.score).toLocaleString('zh-CN') + ' 分' : '积分待确认'} · ${identifiedSlots} 个角色 / ${identifiedPsychubes} 个心相。请核对表单，补填其余信息后提交。`;
+    } catch {
+      if (form.isConnected && request === current) note.textContent = '暂时无法识别这张截图，请手动填写。';
+    }
+  });
+}
+
 function openManeSubmitModal() {
   const maps = state.maneMaps.filter(isMapOpen);
   if (!state.connected || !maps.length) return toast('当前暂无开放投稿的调查对象。');
@@ -3044,6 +3118,8 @@ function openManeSubmitModal() {
         <label for="mProof">结算截图 *</label>
         <input id="mProof" name="proof" type="file" accept="image/png,image/jpeg,image/webp" required />
         <span class="field-hint">支持 PNG / JPG / WebP，最大 5 MB。截图仅本人及审核管理员可见。</span>
+        <span class="field-hint">选择结算图后自动识别，识别结果可手动修改。</span>
+        <span class="field-hint" id="mScreenshotStatus" role="status"></span>
       </div>
       ${contactField}
       <div class="form-actions">
@@ -3051,6 +3127,7 @@ function openManeSubmitModal() {
         <button type="submit" class="copper-btn">提交审核 →</button>
       </div>
     </form>`, true);
+  bindManeScreenshot($('#maneSubmitForm'), maps);
 }
 
 async function handleManeSubmit(form) {
