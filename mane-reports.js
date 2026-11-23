@@ -92,7 +92,7 @@ function loadWorkbookWriter() {
   return sheetJs;
 }
 
-export async function exportManeWorkbook({date, basis, divisions, maps, dailyRows, totals, divisionLabels, sectionLabels, canDownload}) {
+export async function exportManeWorkbook({date, divisions, maps, dailyRows, totals, divisionLabels, sectionLabels, canDownload}) {
   const XLSX = await loadWorkbookWriter();
   const workbook = XLSX.utils.book_new();
   const mapById = new Map(maps.map((map) => [map.id, map]));
@@ -104,15 +104,14 @@ export async function exportManeWorkbook({date, basis, divisions, maps, dailyRow
   };
 
   if (dailyRows !== null) {
-    const headers = [basis === 'approved_at' ? '通过时间（北京时间）' : '投稿时间（北京时间）',
-      '版本', '分区', '关卡', '塑造', '玩家昵称', '主 C', '阵容', '积分', '相关链接'];
+    const headers = ['通过时间（北京时间）', '版本', '分区', '关卡', '塑造', '玩家昵称', '主 C', '阵容', '积分', '相关链接'];
     const values = dailyRows.map((row) => {
       const map = mapById.get(row.map_id);
-      return [beijingTime(row[basis]), map?.edition, sectionLabels[map?.section], map?.name,
+      return [beijingTime(row.approved_at), map?.edition, sectionLabels[map?.section], map?.name,
         divisionLabels[row.division], row.display_name, row.carry,
         (row.team || []).join('、'), excelScore(row.score), row.related_url || ''];
     });
-    addSheet(basis === 'approved_at' ? '每日新分' : '按投稿日查询', headers, values, [24,12,16,22,14,22,26,48,18,40]);
+    addSheet('每日新分', headers, values, [24,12,16,22,14,22,26,48,18,40]);
   }
 
   if (totals !== null) {

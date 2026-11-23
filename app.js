@@ -39,7 +39,7 @@ import {
   showRejectionForm
 } from './submission-progress.js';
 import { validateLineup } from './flashback-logic.mjs';
-import {beijingDayRange, beijingTime, exportManeWorkbook, rankManeCarryTotals, todayInBeijing} from './mane-reports.js?v=20261123-reports';
+import {beijingDayRange, beijingTime, exportManeWorkbook, rankManeCarryTotals, todayInBeijing} from './mane-reports.js?v=20261123-today';
 
 const $ = (sel) => document.querySelector(sel);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (ch) =>
@@ -88,7 +88,7 @@ const MIME_TO_EXT = {
 const state = {
   mode: 'mane',           // 'mane' | 'flashback'
   manePage: 'scores',
-  maneDaily: {date: '', basis: 'approved_at', division: '', map: ''},
+  maneDaily: {division: '', map: ''},
   fbPage: 'leaderboard',  // 'leaderboard' | 'carries' | 'players' | 'rules'
 
   connected: false,
@@ -1422,41 +1422,33 @@ function renderFlashbackStageMechanicsDrawer(mech) {
 }
 
 /* ==================== 鬃毛邮报页面渲染 ==================== */
-const MANE_DAILY_BASES = {approved_at: '按审核通过日', created_at: '按投稿日'};
-
-async function loadManeDailyRows({date, basis, division, mapIds}) {
+async function loadManeDailyRows({date, division, mapIds}) {
   const [start, end] = beijingDayRange(date);
   const rows = [];
   for (let offset = 0; ; offset += 500) {
-    let query = sb.from('mane_daily_scores').select('id,map_id,division,display_name,carry,team,score,created_at,approved_at,related_url')
-      .gte(basis, start).lt(basis, end);
+    let query = sb.from('mane_daily_scores').select('id,map_id,division,display_name,carry,team,score,approved_at,related_url')
+      .gte('approved_at', start).lt('approved_at', end);
     if (division) query = query.eq('division', division);
     if (mapIds.length) query = query.in('map_id', mapIds);
-    const page = await checked(query.order(basis, {ascending: false}).order('id').range(offset, offset + 499));
+    const page = await checked(query.order('approved_at', {ascending: false}).order('id').range(offset, offset + 499));
     rows.push(...page);
     if (page.length < 500) return rows;
   }
 }
 
 function renderManeDaily() {
-  const {date, basis, division, map} = state.maneDaily;
+  const {division, map} = state.maneDaily;
   const today = todayInBeijing();
   const mapOptions = state.maneMaps.map((m) => [m.id, `${m.edition} · ${m.name}`]);
   return `<section class="board-panel">
     <div class="board-header">
       <div class="board-title-stack">
         <h2>每日新分</h2>
-        <p class="board-subtitle">按北京时间统计已通过的成绩。功能上线前的记录可按投稿日查看。</p>
+        <p class="board-subtitle">${today}（北京时间）审核通过的成绩</p>
       </div>
       <button type="button" class="outline-btn" data-action="refresh-mane-daily">刷新</button>
     </div>
     <div class="form-grid" style="padding:16px 16px 0">
-      <div class="field"><label for="maneDailyDate">日期</label>
-        <input id="maneDailyDate" type="date" data-mane-daily="date" value="${esc(date || today)}" max="${today}" />
-      </div>
-      <div class="field"><label for="maneDailyBasis">日期依据</label>
-        <select id="maneDailyBasis" data-mane-daily="basis">${optionsHtml(Object.entries(MANE_DAILY_BASES), basis)}</select>
-      </div>
       <div class="field"><label for="maneDailyDivision">塑造</label>
         <select id="maneDailyDivision" data-mane-daily="division">${optionsHtml([['', '全部塑造'], ...Object.entries(DIVISIONS)], division)}</select>
       </div>
@@ -1464,7 +1456,7 @@ function renderManeDaily() {
         <select id="maneDailyMap" data-mane-daily="map">${optionsHtml([['', '全部关卡'], ...mapOptions], map)}</select>
       </div>
     </div>
-    <div id="maneDailyResults" aria-live="polite"><p class="board-foot">${state.loading ? '正在连接档案库…' : '正在读取成绩…'}</p></div>
+    <div id="maneDailyResults" data-date="${today}" aria-live="polite"><p class="board-foot">${state.loading ? '正在连接档案库…' : '正在读取成绩…'}</p></div>
   </section>`;
 }
 
@@ -1473,9 +1465,9 @@ async function fillManeDailyResults(host) {
     if (!state.loading) host.textContent = '暂时无法连接档案库。';
     return;
   }
-  const {date, basis, division, map} = state.maneDaily;
+  const {division, map} = state.maneDaily;
   try {
-    const rows = await loadManeDailyRows({date: date || todayInBeijing(), basis, division, mapIds: map ? [map] : []});
+    const rows = await loadManeDailyRows({date: host.dataset.date, division, mapIds: map ? [map] : []});
     if (!host.isConnected) return;
     if (!rows.length) {
       host.innerHTML = '<div class="empty-state"><h3>当天暂无符合条件的成绩</h3></div>';
@@ -1486,7 +1478,7 @@ async function fillManeDailyResults(host) {
       <div class="table-scroll"><table class="archive-table">
         <thead><tr><th>时间</th><th>关卡</th><th>塑造</th><th>玩家</th><th>主 C / 阵容</th><th class="num-col">积分</th></tr></thead>
         <tbody>${rows.map((row) => `<tr>
-          <td>${esc(beijingTime(row[basis]).split(' ')[1])}</td>
+          <td>${esc(beijingTime(row.approved_at).split(' ')[1])}</td>
           <td>${esc(mapById.get(row.map_id)?.name || '')}</td>
           <td>${esc(DIVISIONS[row.division])}</td>
           <td>${esc(row.display_name)}</td>
@@ -3458,8 +3450,6 @@ function openManeExport(status) {
     if (!groups.has(group)) groups.set(group, []);
     groups.get(group).push(map);
   }
-  const today = todayInBeijing();
-  const {date, basis} = state.maneDaily;
   openModal(`
     <div class="modal-eyebrow">MANE’S BULLETIN · EXPORT</div>
     <h2>导出鬃毛邮报成绩</h2>
@@ -3472,12 +3462,6 @@ function openManeExport(status) {
         </div>
       </fieldset>
       <div class="form-grid">
-        <div class="field"><label for="maneExportDate">新分日期</label>
-          <input id="maneExportDate" name="date" type="date" value="${esc(date || today)}" max="${today}" />
-        </div>
-        <div class="field"><label for="maneExportBasis">新分日期依据</label>
-          <select id="maneExportBasis" name="basis">${optionsHtml(Object.entries(MANE_DAILY_BASES), basis)}</select>
-        </div>
         <div class="field"><label for="maneExportDivision">塑造</label>
           <select id="maneExportDivision" name="division">${optionsHtml([['', '全部塑造'], ...Object.entries(DIVISIONS)], '')}</select>
         </div>
@@ -3497,7 +3481,7 @@ function openManeExport(status) {
           </div>`).join('')}
         </div>
       </fieldset>
-      <p class="field-hint">主 C 总计按分区、版本和塑造分别排名，所选关卡各取最高分。日期只影响每日新分。</p>
+      <p class="field-hint">每日新分导出北京时间当天审核通过的成绩。主 C 总计按分区、版本和塑造分别排名，所选关卡各取最高分。</p>
       <div class="form-actions">
         <button type="button" class="outline-btn" data-mane-admin="${esc(status)}">返回审核</button>
         <button type="submit" class="copper-btn">下载 Excel</button>
@@ -3514,18 +3498,17 @@ async function submitManeExport(form) {
   if (!sheets.size) throw new Error('请至少选择一种导出内容。');
   if (!maps.length) throw new Error('请至少选择一个关卡。');
   const division = fields.get('division');
-  const basis = fields.get('basis');
-  if ((division && !Object.hasOwn(DIVISIONS, division)) || !Object.hasOwn(MANE_DAILY_BASES, basis)) {
+  if (division && !Object.hasOwn(DIVISIONS, division)) {
     throw new Error('筛选条件无效，请重新选择。');
   }
-  const date = sheets.has('daily') ? fields.get('date') : todayInBeijing();
+  const date = todayInBeijing();
   const [dailyRows, totals] = await Promise.all([
-    sheets.has('daily') ? loadManeDailyRows({date, basis, division, mapIds: maps.map((map) => map.id)}) : null,
+    sheets.has('daily') ? loadManeDailyRows({date, division, mapIds: maps.map((map) => map.id)}) : null,
     sheets.has('totals') ? loadPages('mane_carry_total_leaderboard', ['section','edition','division','carry_key']) : null
   ]);
   if (!form.isConnected || !state.isAdmin) return;
   await exportManeWorkbook({
-    date, basis, divisions: division ? [division] : Object.keys(DIVISIONS), maps, dailyRows, totals,
+    date, divisions: division ? [division] : Object.keys(DIVISIONS), maps, dailyRows, totals,
     divisionLabels: DIVISIONS, sectionLabels: MANE_SECTIONS,
     canDownload: () => form.isConnected && state.isAdmin
   });
