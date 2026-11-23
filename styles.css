@@ -4368,6 +4368,69 @@ body[data-mode="flashback"] .psy-chip.active {
     grid-row: 3;
   }
 
+  /* 6b2. 鬃毛 · 每日新分 */
+  .table-mane-daily tbody tr {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 6px 8px;
+    padding: 12px;
+    align-items: baseline;
+  }
+  .table-mane-daily .cell-daily-time {
+    grid-column: 1;
+    grid-row: 1;
+    font-size: 11px;
+    color: var(--ink-muted);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .table-mane-daily .cell-daily-map {
+    grid-column: 2;
+    grid-row: 1;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink-strong);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .table-mane-daily .cell-daily-div {
+    grid-column: 3;
+    grid-row: 1;
+    justify-self: end;
+    font-size: 10.5px;
+    color: var(--copper-light);
+    padding: 1px 6px;
+    border: 1px solid rgba(213, 134, 62, 0.3);
+    border-radius: 2px;
+    background: rgba(213, 134, 62, 0.1);
+    white-space: nowrap;
+  }
+  .table-mane-daily .cell-daily-player {
+    grid-column: 1 / span 2;
+    grid-row: 2;
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--linen);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .table-mane-daily .cell-daily-score {
+    grid-column: 3;
+    grid-row: 2;
+    text-align: right;
+    white-space: nowrap;
+  }
+  .table-mane-daily .cell-daily-lineup {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    padding-top: 6px;
+    border-top: 1px dashed var(--line-hair);
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--ink-body);
+  }
+
   /* 6c. 焦点闪回 · 主 C 排行榜 & 玩家荣誉殿堂 */
   .table-fb-carries tbody tr,
   .table-fb-players tbody tr {
@@ -4528,4 +4591,65 @@ body[data-mode="flashback"] .psy-chip.active {
   .subnav-tab { padding: 7px 5px; font-size: 11.5px; }
   .sidebar-portrayal-block .seg-btn { padding: 6px 5px; font-size: 11.5px; gap: 3px; }
   .mobile-filter-toggle { padding: 0 9px; font-size: 11.5px; }
+}
+
+/* ==================== 截图上传缩略预览 & 审核图点击放大灯箱 ==================== */
+.proof-upload-preview {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border: 1px solid var(--line-hair);
+  border-radius: var(--radius-xs);
+  background: rgba(10, 8, 7, 0.45);
+}
+.proof-upload-preview[hidden] { display: none; }
+.proof-upload-preview img {
+  max-height: 76px;
+  max-width: 140px;
+  border-radius: 2px;
+  object-fit: cover;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  cursor: zoom-in;
+}
+.proof-upload-meta {
+  font-size: 11.5px;
+  color: var(--ink-muted);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.proof-img { cursor: zoom-in; }
+.proof-lightbox-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1400;
+  background: rgba(8, 6, 5, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  cursor: zoom-out;
+}
+.proof-lightbox-overlay img {
+  max-width: min(96vw, 1440px);
+  max-height: 92vh;
+  object-fit: contain;
+  border: 1px solid rgba(213, 134, 62, 0.45);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.8);
+  cursor: default;
+}
+.proof-lightbox-close {
+  position: fixed;
+  top: 14px;
+  right: 16px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(20, 15, 13, 0.88);
+  color: var(--linen);
+  font-size: 20px;
+  cursor: pointer;
 }

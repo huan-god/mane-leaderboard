@@ -69,6 +69,11 @@ function excelScore(score) {
   return value <= 999999999999999n ? Number(value) : value.toString();
 }
 
+function safeExcelText(value) {
+  const text = String(value ?? '');
+  return /^[\s]*[=+\-@\t\r]/.test(text) ? `'${text}` : text;
+}
+
 let sheetJs;
 function loadWorkbookWriter() {
   if (!sheetJs) {
@@ -107,9 +112,9 @@ export async function exportManeWorkbook({date, divisions, maps, dailyRows, tota
     const headers = ['通过时间（北京时间）', '版本', '分区', '关卡', '塑造', '玩家昵称', '主 C', '阵容', '积分', '相关链接'];
     const values = dailyRows.map((row) => {
       const map = mapById.get(row.map_id);
-      return [beijingTime(row.approved_at), map?.edition, sectionLabels[map?.section], map?.name,
-        divisionLabels[row.division], row.display_name, row.carry,
-        (row.team || []).join('、'), excelScore(row.score), row.related_url || ''];
+      return [beijingTime(row.approved_at), safeExcelText(map?.edition), safeExcelText(sectionLabels[map?.section]), safeExcelText(map?.name),
+        safeExcelText(divisionLabels[row.division]), safeExcelText(row.display_name), safeExcelText(row.carry),
+        safeExcelText((row.team || []).join('、')), excelScore(row.score), safeExcelText(row.related_url || '')];
     });
     addSheet('每日新分', headers, values, [24,12,16,22,14,22,26,48,18,40]);
   }
@@ -127,13 +132,13 @@ export async function exportManeWorkbook({date, divisions, maps, dailyRows, tota
         const ranks = rankManeCarryTotals(totals, section, edition, division, mapIds);
         for (const [index, row] of ranks.entries()) {
           const byMap = new Map(row.map_scores.map((map) => [map.map_id, excelScore(map.score)]));
-          values.push([index + 1, sectionLabels[section], edition, divisionLabels[division],
-            row.carry_name, excelScore(row.total), row.map_count, ...maps.map((map) => byMap.get(map.id) ?? null)]);
+          values.push([index + 1, safeExcelText(sectionLabels[section]), safeExcelText(edition), safeExcelText(divisionLabels[division]),
+            safeExcelText(row.carry_name), excelScore(row.total), row.map_count, ...maps.map((map) => byMap.get(map.id) ?? null)]);
         }
       }
     }
     addSheet('主 C 总计', ['排名','分区','版本','塑造','主 C','总积分','关卡数',
-      ...maps.map((map) => `${map.edition} · ${map.name}`)],
+      ...maps.map((map) => safeExcelText(`${map.edition} · ${map.name}`))],
     values, [10,16,12,14,26,18,10,...maps.map(() => 25)]);
   }
   if (canDownload()) XLSX.writeFileXLSX(workbook, `鬃毛邮报-${date}.xlsx`, {compression: true});

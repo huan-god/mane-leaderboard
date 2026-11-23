@@ -39,7 +39,7 @@ import {
   showRejectionForm
 } from './submission-progress.js';
 import { canonicalTeam, validateLineup } from './flashback-logic.mjs';
-import {beijingDayRange, beijingTime, exportManeWorkbook, rankManeCarryTotals, todayInBeijing} from './mane-reports.js?v=20261123-today';
+import {beijingDayRange, beijingTime, exportManeWorkbook, rankManeCarryTotals, todayInBeijing} from './mane-reports.js?v=20261123-fix1';
 
 const $ = (sel) => document.querySelector(sel);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (ch) =>
@@ -85,8 +85,10 @@ const MIME_TO_EXT = {
   'image/webp': 'webp'
 };
 
+const DEFAULT_MODE = location.pathname.toLowerCase().includes('flashback') ? 'flashback' : 'mane';
+
 const state = {
-  mode: 'mane',           // 'mane' | 'flashback'
+  mode: DEFAULT_MODE,     // 'mane' | 'flashback'
   manePage: 'scores',
   maneDaily: {division: '', map: ''},
   fbPage: 'leaderboard',  // 'leaderboard' | 'carries' | 'players' | 'rules'
@@ -313,7 +315,7 @@ function renderBuildSlotItemHtml(idx) {
       <div class="build-slot-head">
         <div class="build-slot-head-left">
           <span class="build-slot-index">${idx + 1}号位</span>
-          <span class="build-slot-char">${esc(charLabel || '待选择角色')}</span>
+          <span class="build-slot-char">${esc(charLabel || (idx === 0 ? '待选择角色' : '可留空'))}</span>
         </div>
         <button type="button" class="carry-check-btn ${isCarry ? 'checked' : ''}" data-toggle-carry="${idx}" role="checkbox" aria-checked="${isCarry}" ${canCarry ? '' : 'disabled'} title="${canCarry ? '勾选或取消主 C（支持共同主 C）' : '主 C 需选明确的单名角色'}">
           <span class="carry-check-box" aria-hidden="true">${isCarry ? '✓' : ''}</span>
@@ -359,15 +361,15 @@ function renderBuildSlotItemHtml(idx) {
 function renderTeamBuilderSummaryText() {
   const chosen = modalBuildState.chars.map((c, i) => ({ c, i })).filter((x) => x.c);
   const carries = chosen.filter((x) => modalBuildState.carries[x.i]).map((x) => x.c);
-  if (!chosen.length) return '请点击下方方框依次选择 1–4 名上阵角色，并勾选主 C';
-  return `已选 ${chosen.length}/4 人 · 主 C：${carries.length ? carries.join(' / ') : '未勾选（请点击右上角「主 C」）'}`;
+  if (!chosen.length) return '支持 1–4 人（少人解空位留空即可），点选角色并勾选主 C';
+  return `已选 ${chosen.length} 人（支持 1–4 人）· 主 C：${carries.length ? carries.join(' / ') : '未勾选（请点击右上角「主 C」）'}`;
 }
 
 function renderTeamBuilderFieldHtml() {
   return `
     <div class="field build-slots-field">
       <div class="build-slots-label-row">
-        <label>上阵角色、主 C 与配装 *（1–4 号位）</label>
+        <label>上阵角色、主 C 与配装 *（1–4 人，少人解可留空）</label>
         <span class="build-slots-hint" id="teamBuilderSummary">${esc(renderTeamBuilderSummaryText())}</span>
       </div>
       <div class="build-slots-grid" id="buildSlotsGrid">
@@ -560,14 +562,9 @@ function commitCharPickerChoices(choices) {
   closeCharPicker();
 }
 
-function renderPsychubePicker() {
-  const root = $('#psyPickerRoot');
-  if (!root) return;
-  if (!psyPickerState.open) {
-    root.innerHTML = '';
-    return;
-  }
-
+function refreshPsychubePickerResults() {
+  const grid = $('#psyPickerGrid');
+  if (!grid) return;
   const q = normKey(psyPickerState.query);
   const filtered = PSYCHUBES.filter((p) => {
     if (psyPickerState.star !== 'all' && String(p.star) !== psyPickerState.star) return false;
@@ -581,6 +578,32 @@ function renderPsychubePicker() {
       normKey(p.version).includes(q)
     );
   });
+  grid.innerHTML = filtered.length
+    ? filtered.map((p) => {
+        const isSelected = modalBuildState.psychubes[psyPickerState.slotIndex] === p.name;
+        return `
+          <button type="button" class="psy-card-option ${isSelected ? 'is-selected' : ''}" data-choose-psy="${esc(p.name)}" title="${esc(p.name)}（${p.star}★ · ${esc(p.stat)} · v${esc(p.version)}）">
+            ${renderPsychubeThumbHtml(p.id, 'in-picker')}
+            <span class="psy-opt-name">${esc(p.name)}</span>
+            <span class="psy-opt-meta">${p.star}★ · ${esc(p.stat)}</span>
+          </button>`;
+      }).join('')
+    : '<div class="empty-state" style="grid-column:1/-1;padding:28px 12px"><p>没有匹配的心相，请更换关键词或重置标签筛选。</p></div>';
+  grid.scrollTop = 0;
+  $('#psyPickerOverlay')?.querySelectorAll('[data-psy-star], [data-psy-tag]').forEach((button) => {
+    const active = button.dataset.psyStar === psyPickerState.star || button.dataset.psyTag === psyPickerState.tag;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+}
+
+function renderPsychubePicker() {
+  const root = $('#psyPickerRoot');
+  if (!root) return;
+  if (!psyPickerState.open) {
+    root.innerHTML = '';
+    return;
+  }
 
   const targetTitle = psyPickerState.charName
     ? `为 ${psyPickerState.slotIndex + 1} 号位「${psyPickerState.charName}」选择心相`
@@ -607,25 +630,13 @@ function renderPsychubePicker() {
           </div>
           <div class="search-input-wrap">
             <img class="search-input-icon" src="./assets/uttu/btn_search.webp" alt="" aria-hidden="true" />
-            <input id="psyPickerSearch" class="filter-input has-icon" type="search" placeholder="搜索心相名称、词条（暴击/术法/仪式/治疗）…" value="${esc(psyPickerState.query)}" />
+            <input id="psyPickerSearch" class="filter-input has-icon" type="search" aria-label="搜索心相" placeholder="搜索心相名称、词条（暴击/术法/仪式/治疗）…" value="${esc(psyPickerState.query)}" />
           </div>
         </div>
-        <div class="psy-picker-grid">
-          ${filtered.length
-            ? filtered.map((p) => {
-                const isSelected = modalBuildState.psychubes[psyPickerState.slotIndex] === p.name;
-                return `
-                  <button type="button" class="psy-card-option ${isSelected ? 'is-selected' : ''}" data-choose-psy="${esc(p.name)}" title="${esc(p.name)}（${p.star}★ · ${esc(p.stat)} · v${esc(p.version)}）">
-                    ${renderPsychubeThumbHtml(p.id, 'in-picker')}
-                    <span class="psy-opt-name">${esc(p.name)}</span>
-                    <span class="psy-opt-meta">${p.star}★ · ${esc(p.stat)}</span>
-                  </button>`;
-              }).join('')
-            : '<div class="empty-state" style="grid-column:1/-1;padding:28px 12px"><p>没有匹配的心相，请更换关键词或重置标签筛选。</p></div>'
-          }
-        </div>
+        <div id="psyPickerGrid" class="psy-picker-grid"></div>
       </section>
     </div>`;
+  refreshPsychubePickerResults();
 }
 
 function openPsychubePicker(slotIndex) {
@@ -777,7 +788,52 @@ function openModal(html, wide = false) {
     </div>`;
 }
 
+let activeUploadPreviewUrl = '';
+
+function clearUploadPreview(host) {
+  if (activeUploadPreviewUrl) {
+    URL.revokeObjectURL(activeUploadPreviewUrl);
+    activeUploadPreviewUrl = '';
+  }
+  if (host) {
+    host.innerHTML = '';
+    host.hidden = true;
+  }
+}
+
+function renderUploadPreview(host, file) {
+  clearUploadPreview(host);
+  if (!host || !file || !MIME_TO_EXT[file.type] || file.size > 5 * 1024 * 1024) return;
+  activeUploadPreviewUrl = URL.createObjectURL(file);
+  const sizeKb = file.size >= 1024 * 1024
+    ? `${(file.size / (1024 * 1024)).toFixed(2)} MB`
+    : `${Math.max(1, Math.round(file.size / 1024))} KB`;
+  host.innerHTML = `<img src="${esc(activeUploadPreviewUrl)}" alt="已选截图预览" title="点击放大预览" /><span class="proof-upload-meta">${esc(file.name)} · ${sizeKb}（点击图片可放大）</span>`;
+  host.hidden = false;
+}
+
+function openProofLightbox(src, alt = '截图放大预览') {
+  if (!src) return;
+  closeProofLightbox();
+  const overlay = document.createElement('div');
+  overlay.id = 'proofLightboxOverlay';
+  overlay.className = 'proof-lightbox-overlay';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.innerHTML = `<button type="button" class="proof-lightbox-close" data-action="close-lightbox" aria-label="关闭大图预览">×</button><img src="${esc(src)}" alt="${esc(alt)}" />`;
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay || e.target.closest('[data-action="close-lightbox"]')) closeProofLightbox();
+  });
+  document.body.append(overlay);
+}
+
+function closeProofLightbox() {
+  $('#proofLightboxOverlay')?.remove();
+}
+
 function closeModal() {
+  closeProofLightbox();
+  clearUploadPreview();
   closeCharPicker();
   closePsychubePicker();
   $('#modalRoot').innerHTML = '';
@@ -1593,15 +1649,15 @@ async function fillManeDailyResults(host) {
     }
     const mapById = new Map(state.maneMaps.map((m) => [m.id, m]));
     host.innerHTML = `<p class="board-foot">共 ${rows.length} 条已通过成绩</p>
-      <div class="table-scroll"><table class="archive-table">
+      <div class="table-scroll"><table class="archive-table table-mane-daily">
         <thead><tr><th>时间</th><th>关卡</th><th>塑造</th><th>玩家</th><th>主 C / 阵容</th><th class="num-col">积分</th></tr></thead>
         <tbody>${rows.map((row) => `<tr>
-          <td>${esc(beijingTime(row.approved_at).split(' ')[1])}</td>
-          <td>${esc(mapById.get(row.map_id)?.name || '')}</td>
-          <td>${esc(DIVISIONS[row.division])}</td>
-          <td>${esc(row.display_name)}</td>
-          <td><strong>${esc(row.carry)}</strong><br>${esc((row.team || []).join('、'))} ${safeLinkHtml(row.related_url)}</td>
-          <td class="num-col"><span class="score-value">${formatScore(row.score)}</span></td>
+          <td class="cell-daily-time" data-label="时间">${esc(beijingTime(row.approved_at).split(' ')[1])}</td>
+          <td class="cell-daily-map" data-label="关卡">${esc(mapById.get(row.map_id)?.name || '')}</td>
+          <td class="cell-daily-div" data-label="塑造">${esc(DIVISIONS[row.division] || row.division)}</td>
+          <td class="cell-daily-player" data-label="玩家">${esc(row.display_name)}</td>
+          <td class="cell-daily-lineup" data-label="阵容"><strong>${esc(formatCanonicalCarry(row.carry))}</strong><br>${esc((row.team || []).map(canonicalDisplayName).join('、'))} ${safeLinkHtml(row.related_url)}</td>
+          <td class="num-col cell-daily-score" data-label="积分"><span class="score-value">${formatScore(row.score)}</span></td>
         </tr>`).join('')}</tbody>
       </table></div>`;
   } catch {
@@ -3174,7 +3230,7 @@ function maneScoreFieldsHtml(record, maps) {
     <div class="field"><label for="mLink">相关链接（选填）</label><input id="mLink" name="related_url" type="url" maxlength="2048" placeholder="https://" value="${esc(record.related_url || '')}" /></div>`;
 }
 
-function readManeFields(fd) {
+function readManeFields(fd, { forEdit = false } = {}) {
   const scoreText = String(fd.get('score') ?? '').trim().replace(/[,，]/g, '');
   const score = Number(scoreText);
   const display_name = String(fd.get('display_name') ?? '').trim();
@@ -3195,14 +3251,20 @@ function readManeFields(fd) {
     score,
     related_url: parseHttpUrl(fd.get('related_url')) || null
   };
-  if (built.hasPsychubes) res.team_psychubes = built.psychubes;
-  if (built.hasResonance) res.team_resonance_codes = built.resonanceCodes;
+  if (forEdit) {
+    res.team_psychubes = built.hasPsychubes ? built.psychubes : null;
+    res.team_resonance_codes = built.hasResonance ? built.resonanceCodes : null;
+  } else {
+    if (built.hasPsychubes) res.team_psychubes = built.psychubes;
+    if (built.hasResonance) res.team_resonance_codes = built.resonanceCodes;
+  }
   return res;
 }
 
 function bindManeScreenshot(form, maps) {
   const proof = form.querySelector('#mProof');
   const note = form.querySelector('#mScreenshotStatus');
+  const preview = form.querySelector('#mProofPreview');
   const mapField = form.elements.namedItem('map_id');
   const scoreField = form.elements.namedItem('score');
   let mapEdited = false;
@@ -3216,6 +3278,7 @@ function bindManeScreenshot(form, maps) {
     refreshBuildSlotsGrid();
 
     const file = proof.files[0];
+    renderUploadPreview(preview, file);
     if (!file || !MIME_TO_EXT[file.type] || file.size > 5 * 1024 * 1024) {
       note.textContent = '';
       return;
@@ -3290,13 +3353,14 @@ function openManeSubmitModal() {
       </small>
     </div>
     <form id="maneSubmitForm">
-      ${maneScoreFieldsHtml({ map_id: state.maneMapId, division: state.maneDivision, display_name: nick }, maps)}
       <div class="field">
         <label for="mProof">结算截图 *</label>
         <input id="mProof" name="proof" type="file" accept="image/png,image/jpeg,image/webp" required />
         <span class="field-hint">支持 PNG / JPG / WebP，最大 5 MB。截图仅本人及审核管理员可见。</span>
         <span class="field-hint" id="mScreenshotStatus" role="status"></span>
+        <div id="mProofPreview" class="proof-upload-preview" hidden></div>
       </div>
+      ${maneScoreFieldsHtml({ map_id: state.maneMapId, division: state.maneDivision, display_name: nick }, maps)}
       ${contactField}
       <div class="form-actions">
         <button type="button" class="outline-btn" data-action="close-modal">取消</button>
@@ -3360,6 +3424,7 @@ function bindFlashbackScreenshot(form) {
   const rounds = form.elements.namedItem('rounds');
   const version = form.elements.namedItem('version');
   const note = form.querySelector('#fbScreenshotStatus');
+  const preview = form.querySelector('#fbProofPreview');
   let request = 0;
   let stageEdited = false;
   let roundsEdited = false;
@@ -3377,6 +3442,7 @@ function bindFlashbackScreenshot(form) {
     undoPrefill = [];
     refreshBuildSlotsGrid();
     const file = proof.files[0];
+    renderUploadPreview(preview, file);
     note.textContent = '';
     if (!file?.size || !MIME_TO_EXT[file.type] || file.size > 5 * 1024 * 1024) return;
     note.textContent = '正在识别通关截图…';
@@ -3484,6 +3550,7 @@ function openFbSubmitModal() {
         <input id="fbFormProof" name="proof" type="file" accept="image/png,image/jpeg,image/webp" required />
         <span class="field-hint">PNG / JPG / WebP，最大 5 MB，仅本人及管理员可见。</span>
         <span class="field-hint" id="fbScreenshotStatus" role="status"></span>
+        <div id="fbProofPreview" class="proof-upload-preview" hidden></div>
       </div>
       <div class="form-grid">
         <div class="field"><label for="fbNick">玩家昵称 *</label><input id="fbNick" name="nickname" readonly value="${esc(state.profile.display_name)}" /></div>
@@ -3866,7 +3933,7 @@ async function openManeAdmin(status = 'pending') {
     }
     const fetchRows = (filters) => checked(filterModerationRows(
       sb.from('mane_entries')
-        .select('*')
+        .select('*,submission_contacts(contact)')
         .eq('status', status)
         .is('archived_at', null),
       filters, 'map_id', 'division'
@@ -3886,7 +3953,7 @@ async function openManeAdmin(status = 'pending') {
                 ${renderAdminBuildSummaryHtml(row)}
                 ${row.review_note ? `<br/>备注：${esc(row.review_note)}` : ''}
               </div>
-              ${safeLinkHtml(row.related_url)}
+              ${adminContact(row.submission_contacts)}${safeLinkHtml(row.related_url)}
               ${reviewProofHtml('mane', row.id, row.evidence_path)}
               <div class="review-actions">
                 <button class="outline-btn" data-mane-edit="${esc(row.id)}">编辑成绩</button>
@@ -3994,7 +4061,7 @@ async function openFbAdmin(tab = 'pending', openStage = '') {
                 ${r.status === 'removed' ? `<br/>撤销原因：${esc(r.review_note || '未记录')}` :
                   r.status === 'rejected' ? `<br/>拒绝理由：${esc(r.review_note || '未记录')}` : ''}
               </div>
-              ${r.resonance_ten ? resonanceBadge : ''}${safeLinkHtml(r.related_url)}
+              ${r.resonance_ten ? resonanceBadge : ''}${adminContact(r.contact)}${safeLinkHtml(r.related_url)}
               ${reviewProofHtml('flashback', r.id, r.evidence_path)}
               <div class="review-actions">
                 ${tab === 'pending' ? `<button class="approve-btn" data-fb-review="approved" data-id="${esc(r.id)}">✓ 审核通过</button><button class="danger-btn" data-fb-review="rejected" data-id="${esc(r.id)}">× 拒绝</button>` : ''}
@@ -4102,6 +4169,11 @@ function render() {
 
 /* ==================== 全局事件委托 ==================== */
 document.addEventListener('click', async (ev) => {
+  const proofImg = ev.target.closest('.proof-img, .proof-upload-preview img');
+  if (proofImg?.src) {
+    openProofLightbox(proofImg.src, proofImg.alt || '截图放大预览');
+    return;
+  }
   const btn = ev.target.closest('button, a[data-switch-mode]');
   if (!btn) return;
   const dialog = btn.closest('.modal-box');
@@ -4335,6 +4407,8 @@ document.addEventListener('click', async (ev) => {
       const idx = Number(btn.dataset.clearChar);
       modalBuildState.chars[idx] = '';
       modalBuildState.carries[idx] = false;
+      modalBuildState.psychubes[idx] = '';
+      modalBuildState.resonanceCodes[idx] = '';
       refreshBuildSlotsGrid();
       return;
     }
@@ -4364,12 +4438,12 @@ document.addEventListener('click', async (ev) => {
     }
     if (btn.dataset.psyStar !== undefined) {
       psyPickerState.star = btn.dataset.psyStar;
-      renderPsychubePicker();
+      refreshPsychubePickerResults();
       return;
     }
     if (btn.dataset.psyTag !== undefined) {
       psyPickerState.tag = btn.dataset.psyTag;
-      renderPsychubePicker();
+      refreshPsychubePickerResults();
       return;
     }
     if (btn.dataset.choosePsy !== undefined) {
@@ -4666,12 +4740,14 @@ document.addEventListener('change', (ev) => {
 document.addEventListener('input', (ev) => {
   const t = ev.target;
   if (t.id === 'maneSearchInput') {
+    if (ev.isComposing || state.maneQuery === t.value) return;
     const pos = t.selectionStart;
     state.maneQuery = t.value;
     render();
     const el = $('#maneSearchInput');
     if (el) { el.focus(); el.setSelectionRange(pos, pos); }
   } else if (t.id === 'fbSearchInput') {
+    if (ev.isComposing || state.fbQuery === t.value) return;
     const pos = t.selectionStart;
     state.fbQuery = t.value;
     render();
@@ -4685,11 +4761,10 @@ document.addEventListener('input', (ev) => {
       refreshCharPickerResults();
     }
   } else if (t.id === 'psyPickerSearch') {
-    const pos = t.selectionStart;
-    psyPickerState.query = t.value;
-    renderPsychubePicker();
-    const el = $('#psyPickerSearch');
-    if (el) { el.focus(); el.setSelectionRange(pos, pos); }
+    if (!ev.isComposing && psyPickerState.query !== t.value) {
+      psyPickerState.query = t.value;
+      refreshPsychubePickerResults();
+    }
   }
 });
 
@@ -4698,6 +4773,21 @@ document.addEventListener('compositionend', (ev) => {
   if (input.id === 'charPickerSearch' && charPickerState.query !== input.value) {
     charPickerState.query = input.value;
     refreshCharPickerResults();
+  } else if (input.id === 'psyPickerSearch' && psyPickerState.query !== input.value) {
+    psyPickerState.query = input.value;
+    refreshPsychubePickerResults();
+  } else if (input.id === 'maneSearchInput' && state.maneQuery !== input.value) {
+    const pos = input.selectionStart;
+    state.maneQuery = input.value;
+    render();
+    const el = $('#maneSearchInput');
+    if (el) { el.focus(); el.setSelectionRange(pos, pos); }
+  } else if (input.id === 'fbSearchInput' && state.fbQuery !== input.value) {
+    const pos = input.selectionStart;
+    state.fbQuery = input.value;
+    render();
+    const el = $('#fbSearchInput');
+    if (el) { el.focus(); el.setSelectionRange(pos, pos); }
   }
 });
 
@@ -4716,7 +4806,7 @@ document.addEventListener('submit', async (ev) => {
     } else if (form.id === 'maneExportForm') {
       await submitManeExport(form);
     } else if (form.id === 'maneEditForm' && state.isAdmin) {
-      const patch = readManeFields(new FormData(form));
+      const patch = readManeFields(new FormData(form), { forEdit: true });
       let updated;
       try {
         updated = await checked(sb.from('mane_entries').update(patch).eq('id', form.dataset.id).eq('updated_at', form.dataset.revision).select('id'));
@@ -4779,17 +4869,18 @@ document.addEventListener('submit', async (ev) => {
         p_related_url: link,
         p_resonance_ten: fd.get('group') === 'zero' && fd.has('resonanceTen')
       }));
-      if (built.hasAny) {
-        try {
-          await checked(sb.rpc('update_submission_builds', {
-            p_id: form.dataset.id,
-            p_team_psychubes: built.hasPsychubes ? built.psychubes : null,
-            p_team_resonance_codes: built.hasResonance ? built.resonanceCodes : null
-          }));
-        } catch (err) {
-          if (isMissingBuildColumnError(err) || /update_submission_builds|PGRST202/i.test(`${err?.code || ''} ${err?.message || ''}`)) {
+      try {
+        await checked(sb.rpc('update_submission_builds', {
+          p_id: form.dataset.id,
+          p_team_psychubes: built.hasPsychubes ? built.psychubes : null,
+          p_team_resonance_codes: built.hasResonance ? built.resonanceCodes : null
+        }));
+      } catch (err) {
+        if (isMissingBuildColumnError(err) || /update_submission_builds|PGRST202/i.test(`${err?.code || ''} ${err?.message || ''}`)) {
+          if (built.hasAny) {
             throw new Error('基础成绩已保存，但线上数据库尚未运行 016_psychubes.sql，请先运行配套迁移 SQL。');
           }
+        } else {
           throw err;
         }
       }
@@ -4833,7 +4924,8 @@ document.addEventListener('submit', async (ev) => {
 
 document.addEventListener('keydown', (ev) => {
   if (ev.key === 'Escape' && !ev.isComposing) {
-    if (charPickerState.open) closeCharPicker();
+    if ($('#proofLightboxOverlay')) closeProofLightbox();
+    else if (charPickerState.open) closeCharPicker();
     else if (psyPickerState.open) closePsychubePicker();
     else closeModal();
   }
