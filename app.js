@@ -119,6 +119,7 @@ const state = {
   fbVersionId: '',
   fbStageId: '',
   fbGroup: 'zero',
+  fbResonanceOnly: false,
   fbRoleMode: 'carry',    // 'carry' | 'member'
   fbCarry: '',            // canonicalCharacterKey
   fbAfflatus: '',         // '' | 'beast'|...
@@ -890,6 +891,7 @@ function readHash() {
     if (grp === 'zero' || grp === 'max') state.fbGroup = grp;
     const rec = params.get('rec');
     if (rec) {
+      state.fbResonanceOnly = false;
       state.highlightRecordId = `fb-${rec}`;
       pendingScrollRecordId = `fb-${rec}`;
     }
@@ -2154,10 +2156,12 @@ function renderFlashbackWorkspace() {
   if (state.fbCarry && !charLabelByKey.has(state.fbCarry)) state.fbCarry = '';
 
   const q = normKey(state.fbQuery);
-  const hasFilter = Boolean(state.fbCarry || state.fbAfflatus || q);
+  const resonanceOnly = state.fbGroup === 'zero' && state.fbResonanceOnly;
+  const hasFilter = Boolean(state.fbCarry || state.fbAfflatus || q || resonanceOnly);
   const filteredRows = ranked
     .map((record, idx) => ({ record, rank: idx + 1 }))
     .filter(({ record }) => {
+      if (resonanceOnly && !record.resonance_ten) return false;
       const decodedMembers = extractLineupCharacterNames(record.team, record.carry_name);
       const targetNames = state.fbRoleMode === 'member'
         ? decodedMembers
@@ -2178,7 +2182,7 @@ function renderFlashbackWorkspace() {
     });
 
   const archives = state.fbArchives
-    .filter((a) => a.stage_id === state.fbStageId && a.group_code === state.fbGroup)
+    .filter((a) => !resonanceOnly && a.stage_id === state.fbStageId && a.group_code === state.fbGroup)
     .sort((a, b) => a.display_order - b.display_order);
 
   const rowsHtml = filteredRows.map(({ record, rank }) => {
@@ -2219,7 +2223,7 @@ function renderFlashbackWorkspace() {
           <div class="player-meta">
             <span title="${esc(formatDateTime(record.created_at))}">${formatMonthDayTime(record.created_at)}</span>
             ${safeLinkHtml(record.related_url, '视频/攻略 ↗')}
-            ${record.resonance_ten ? resonanceBadge : ''}
+            ${record.group_code === 'zero' && record.resonance_ten ? resonanceBadge : ''}
             ${hasBuilds ? '<span class="row-build-tag">心相·共鸣</span>' : ''}
           </div>
         </div>
@@ -2260,7 +2264,7 @@ function renderFlashbackWorkspace() {
     : `${DIVISIONS[state.fbGroup]} · 共 ${ranked.length} 条`;
 
   const canResetFilter = Boolean(hasFilter || state.fbRoleMode !== 'carry');
-  const activeFilterCount = (state.fbCarry ? 1 : 0) + (state.fbAfflatus ? 1 : 0) + (q ? 1 : 0) + (state.fbRoleMode === 'member' ? 1 : 0);
+  const activeFilterCount = [state.fbCarry, state.fbAfflatus, q, state.fbRoleMode === 'member', resonanceOnly].filter(Boolean).length;
 
   return `
     <div class="section-bar fb-section-bar">
@@ -2366,6 +2370,7 @@ function renderFlashbackWorkspace() {
               </div>
               <div class="boss-quick-glance">
                 <span class="glance-tags">0–6 回合有效 / 同队取最短回合</span>
+                ${state.fbGroup === 'zero' ? `<button type="button" class="resonance-tag" data-action="fb-resonance" aria-pressed="${resonanceOnly}">✦ 只看全0塑 · 共鸣10</button>` : ''}
                 ${stageMech ? `<button type="button" class="mech-toggle-btn ${state.fbMechOpen ? 'active' : ''}" data-action="toggle-fb-mech" aria-expanded="${state.fbMechOpen}">${state.fbMechOpen ? '收起关卡机制 ▴' : '查看关卡机制 ▾'}</button>` : ''}
                 ${state.fbCarry ? `<span class="glance-active-chip">${state.fbRoleMode === 'carry' ? '主 C' : '含角色'}：${esc(charLabelByKey.get(state.fbCarry) || '')}</span>` : ''}
                 ${state.fbAfflatus ? `<span class="glance-active-chip">灵感：${esc(AFFLATUS_META[state.fbAfflatus]?.label || '')}</span>` : ''}
@@ -2388,9 +2393,9 @@ function renderFlashbackWorkspace() {
                </div>`
             : (archives.length ? '' : `<div class="empty-state">
                  <span class="empty-glyph">✧</span>
-                 <h3>${state.loading ? '正在加载榜单…' : (ranked.length ? '无匹配的筛选结果' : '当前榜单为空')}</h3>
-                 <p>${ranked.length ? '可尝试点击左侧「重置」清空筛选条件。' : '尚无审核通过的 0–6 回合成绩。'}</p>
-                 ${ranked.length ? '<button class="outline-btn" data-action="reset-fb-filter">重置筛选条件</button>' : (state.connected ? '<button class="copper-btn" data-action="open-submit">投稿首条纪录</button>' : '')}
+                 <h3>${state.loading ? '正在加载榜单…' : (hasFilter ? '无匹配的筛选结果' : '当前榜单为空')}</h3>
+                 <p>${hasFilter ? '可清空筛选条件查看当前关卡的全部成绩。' : '尚无审核通过的 0–6 回合成绩。'}</p>
+                 ${hasFilter ? '<button class="outline-btn" data-action="reset-fb-filter">重置筛选条件</button>' : (state.connected ? '<button class="copper-btn" data-action="open-submit">投稿首条纪录</button>' : '')}
                </div>`)
           }
           ${archiveHtml}
@@ -3299,7 +3304,7 @@ async function handleManeSubmit(form) {
 }
 
 /* 焦点闪回投稿流程（完整兼容 profiles + proofs + submissions） */
-const resonanceBadge = '<span class="division-chip resonance-badge">✦ 全0塑 · 共鸣10</span>';
+const resonanceBadge = '<span class="resonance-tag">✦ 全0塑 · 共鸣10</span>';
 function resonanceChoice(group, isChecked = false) {
   return `<label class="resonance-choice"${group === 'zero' ? '' : ' hidden'}>
     <input name="resonanceTen" type="checkbox"${group === 'zero' ? '' : ' disabled'}${isChecked && group === 'zero' ? ' checked' : ''}>
@@ -4036,6 +4041,7 @@ document.addEventListener('click', async (ev) => {
       state.fbVersionId = btn.dataset.jumpVer || '';
       state.fbStageId = btn.dataset.jumpStage || '';
       state.fbGroup = btn.dataset.jumpGrp || 'zero';
+      state.fbResonanceOnly = false;
       state.fbRoleMode = 'carry';
       state.fbCarry = '';
       state.fbAfflatus = '';
@@ -4105,6 +4111,7 @@ document.addEventListener('click', async (ev) => {
     }
     if (btn.dataset.fbGroup) {
       state.fbGroup = btn.dataset.fbGroup;
+      if (state.fbGroup !== 'zero') state.fbResonanceOnly = false;
       state.fbCarry = '';
       state.highlightRecordId = '';
       render();
@@ -4282,10 +4289,16 @@ document.addEventListener('click', async (ev) => {
       return;
     }
     if (action === 'reset-fb-filter') {
+      state.fbResonanceOnly = false;
       state.fbRoleMode = 'carry';
       state.fbCarry = '';
       state.fbAfflatus = '';
       state.fbQuery = '';
+      render();
+      return;
+    }
+    if (action === 'fb-resonance' && state.fbGroup === 'zero') {
+      state.fbResonanceOnly = !state.fbResonanceOnly;
       render();
       return;
     }
