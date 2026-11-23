@@ -3111,14 +3111,18 @@ function openManeSubmitModal() {
   openModal(`
     <div class="modal-eyebrow">MANE’S BULLETIN · SUBMIT</div>
     <h2>投稿鬃毛邮报成绩</h2>
-    <p class="modal-subtitle">点选 1–4 号位角色、勾选主 C（支持共同主 C），选填心相与共鸣码并附结算截图。</p>
+    <div class="modal-subtitle">
+      <span class="resonance-tag">✦ 已支持图像识别</span>
+      <small class="field-hint" style="display:block;margin-top:6px">
+        选择结算截图后，可自动预填 4.1 三张新图的调查对象和积分，以及部分角色和心相。请核对结果，手动补填未识别项，并选择塑造、勾选主 C（支持共同主 C）。共鸣码选填。
+      </small>
+    </div>
     <form id="maneSubmitForm">
       ${maneScoreFieldsHtml({ map_id: state.maneMapId, division: state.maneDivision, display_name: nick }, maps)}
       <div class="field">
         <label for="mProof">结算截图 *</label>
         <input id="mProof" name="proof" type="file" accept="image/png,image/jpeg,image/webp" required />
         <span class="field-hint">支持 PNG / JPG / WebP，最大 5 MB。截图仅本人及审核管理员可见。</span>
-        <span class="field-hint">选择结算图后自动识别，识别结果可手动修改。</span>
         <span class="field-hint" id="mScreenshotStatus" role="status"></span>
       </div>
       ${contactField}
