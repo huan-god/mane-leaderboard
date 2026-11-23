@@ -4653,3 +4653,22 @@ body[data-mode="flashback"] .psy-chip.active {
   font-size: 20px;
   cursor: pointer;
 }
+
+.draft-restore-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 11px;
+  margin-bottom: 12px;
+  border: 1px solid rgba(213, 134, 62, 0.36);
+  border-left: 3px solid var(--copper);
+  border-radius: var(--radius-xs);
+  background: rgba(213, 134, 62, 0.1);
+  font-size: 12px;
+  color: var(--linen);
+}
+.draft-restore-bar .text-link-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}

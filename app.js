@@ -385,6 +385,104 @@ function refreshBuildSlotsGrid() {
   }
   const summary = $('#teamBuilderSummary');
   if (summary) summary.textContent = renderTeamBuilderSummaryText();
+  const submitForm = $('#maneSubmitForm, #fbSubmitForm');
+  if (submitForm) saveSubmitDraftFromForm(submitForm);
+}
+
+const SUBMIT_DRAFT_KEYS = {
+  mane: 'r1999-mane-submit-draft-v1',
+  flashback: 'r1999-fb-submit-draft-v1'
+};
+const SUBMIT_DRAFT_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+function draftHasContent(board, d) {
+  if (!d || typeof d !== 'object') return false;
+  const hasSlots = (Array.isArray(d.chars) && d.chars.some(Boolean)) ||
+    (Array.isArray(d.psychubes) && d.psychubes.some(Boolean)) ||
+    (Array.isArray(d.resonanceCodes) && d.resonanceCodes.some(Boolean));
+  if (hasSlots) return true;
+  if (board === 'mane') {
+    return Boolean(String(d.score || '').trim() || String(d.related_url || '').trim() || String(d.contact || '').trim());
+  }
+  return Boolean(String(d.rounds ?? '').trim() !== '' || d.resonanceTen || String(d.relatedUrl || '').trim() || String(d.contact || '').trim());
+}
+
+function loadSubmitDraft(board) {
+  const key = SUBMIT_DRAFT_KEYS[board];
+  if (!key) return null;
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    if (parsed.updatedAt && Date.now() - Number(parsed.updatedAt) > SUBMIT_DRAFT_TTL_MS) {
+      localStorage.removeItem(key);
+      return null;
+    }
+    return draftHasContent(board, parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearSubmitDraft(board) {
+  const key = SUBMIT_DRAFT_KEYS[board];
+  if (!key) return;
+  try { localStorage.removeItem(key); } catch {}
+}
+
+function restoreModalBuildFromDraft(draft) {
+  resetModalBuildState();
+  if (!draft || typeof draft !== 'object') return;
+  for (let i = 0; i < 4; i++) {
+    const rawChar = String(draft.chars?.[i] ?? '').trim();
+    modalBuildState.chars[i] = rawChar;
+    modalBuildState.carries[i] = Boolean(canMarkSlotCarry(rawChar) && draft.carries?.[i]);
+    modalBuildState.psychubes[i] = String(draft.psychubes?.[i] ?? '').trim();
+    modalBuildState.resonanceCodes[i] = String(draft.resonanceCodes?.[i] ?? '').trim();
+  }
+}
+
+function saveSubmitDraftFromForm(form) {
+  if (!form || !form.isConnected) return;
+  const board = form.id === 'maneSubmitForm' ? 'mane' : (form.id === 'fbSubmitForm' ? 'flashback' : '');
+  if (!board) return;
+  const fd = new FormData(form);
+  const payload = board === 'mane'
+    ? {
+        map_id: String(fd.get('map_id') ?? ''),
+        division: String(fd.get('division') ?? ''),
+        display_name: String(fd.get('display_name') ?? ''),
+        score: String(fd.get('score') ?? ''),
+        related_url: String(fd.get('related_url') ?? ''),
+        contact: String(fd.get('contact') ?? ''),
+        chars: [...modalBuildState.chars],
+        carries: [...modalBuildState.carries],
+        psychubes: [...modalBuildState.psychubes],
+        resonanceCodes: [...modalBuildState.resonanceCodes],
+        updatedAt: Date.now()
+      }
+    : {
+        version: String(fd.get('version') ?? ''),
+        stage: String(fd.get('stage') ?? ''),
+        group: String(fd.get('group') ?? ''),
+        rounds: String(fd.get('rounds') ?? ''),
+        resonanceTen: fd.has('resonanceTen'),
+        relatedUrl: String(fd.get('relatedUrl') ?? ''),
+        contact: String(fd.get('contact') ?? ''),
+        chars: [...modalBuildState.chars],
+        carries: [...modalBuildState.carries],
+        psychubes: [...modalBuildState.psychubes],
+        resonanceCodes: [...modalBuildState.resonanceCodes],
+        updatedAt: Date.now()
+      };
+  const hasContent = draftHasContent(board, payload);
+  try {
+    if (hasContent) localStorage.setItem(SUBMIT_DRAFT_KEYS[board], JSON.stringify(payload));
+    else localStorage.removeItem(SUBMIT_DRAFT_KEYS[board]);
+  } catch {}
+  const clearBtn = form.querySelector('#clearDraftBtn');
+  if (clearBtn) clearBtn.hidden = !hasContent;
 }
 
 function charactersInOtherSlots() {
@@ -3342,7 +3440,17 @@ function openManeSubmitModal() {
   if (!state.connected || !maps.length) return toast('当前暂无开放投稿的调查对象。');
   let nick = state.profile?.display_name || '';
   try { nick = nick || localStorage.getItem('mane-nickname') || ''; } catch {}
-  resetModalBuildState();
+  const draft = loadSubmitDraft('mane');
+  if (draft) restoreModalBuildFromDraft(draft);
+  else resetModalBuildState();
+
+  const initialMapId = (draft?.map_id && maps.some((m) => m.id === draft.map_id)) ? draft.map_id : state.maneMapId;
+  const initialDiv = (draft?.division && Object.hasOwn(DIVISIONS, draft.division)) ? draft.division : state.maneDivision;
+  const initialNick = draft?.display_name || nick;
+  const draftBanner = draft
+    ? `<div class="draft-restore-bar" id="submitDraftBar"><span>✦ 已自动恢复上次未提交草稿（请重新选择结算截图）</span><button type="button" class="text-link-btn" data-clear-draft="mane">清空草稿</button></div>`
+    : '';
+
   openModal(`
     <div class="modal-eyebrow">MANE’S BULLETIN · SUBMIT</div>
     <h2>投稿鬃毛邮报成绩</h2>
@@ -3352,6 +3460,7 @@ function openManeSubmitModal() {
         选择结算截图后，可自动预填 4.1 三张新图的调查对象和积分，以及部分角色和心相。请核对结果，手动补填未识别项，并选择塑造、勾选主 C（支持共同主 C）。共鸣码选填。
       </small>
     </div>
+    ${draftBanner}
     <form id="maneSubmitForm">
       <div class="field">
         <label for="mProof">结算截图 *</label>
@@ -3360,14 +3469,25 @@ function openManeSubmitModal() {
         <span class="field-hint" id="mScreenshotStatus" role="status"></span>
         <div id="mProofPreview" class="proof-upload-preview" hidden></div>
       </div>
-      ${maneScoreFieldsHtml({ map_id: state.maneMapId, division: state.maneDivision, display_name: nick }, maps)}
+      ${maneScoreFieldsHtml({
+        map_id: initialMapId,
+        division: initialDiv,
+        display_name: initialNick,
+        score: draft?.score || '',
+        related_url: draft?.related_url || ''
+      }, maps)}
       ${contactField}
       <div class="form-actions">
+        <button type="button" class="ghost-btn" id="clearDraftBtn" data-clear-draft="mane" ${draft ? '' : 'hidden'}>清空草稿</button>
         <button type="button" class="outline-btn" data-action="close-modal">取消</button>
         <button type="submit" class="copper-btn">提交审核 →</button>
       </div>
     </form>`, true);
-  bindManeScreenshot($('#maneSubmitForm'), maps);
+  const form = $('#maneSubmitForm');
+  if (draft?.contact && form?.elements?.namedItem('contact')) {
+    form.elements.namedItem('contact').value = draft.contact;
+  }
+  bindManeScreenshot(form, maps);
 }
 
 async function handleManeSubmit(form) {
@@ -3400,6 +3520,7 @@ async function handleManeSubmit(form) {
   state.session = session;
   state.user = session.user;
   try { localStorage.setItem('mane-nickname', record.display_name); } catch {}
+  clearSubmitDraft('mane');
   closeModal();
   toast('已提交，可在「我的投稿」查看审核进度。');
 }
@@ -3502,6 +3623,7 @@ function bindFlashbackScreenshot(form) {
         }
       }
       if (filledChars || filledPsychubes) refreshBuildSlotsGrid();
+      else saveSubmitDraftFromForm(form);
       const stageLabel = detectedStage ? `第${detectedStage.stage_no}关` : '关卡待确认';
       const roundLabel = result.rounds === null ? '回合待确认' : `${result.rounds} 回合`;
       note.textContent = `识别结果：${stageLabel} · ${roundLabel}。已预填 ${filledChars} 个角色、${filledPsychubes} 个心相，请核对并补填其余信息。`;
@@ -3534,7 +3656,19 @@ function openFbSubmitModal() {
     openProfileModal(true);
     return;
   }
-  resetModalBuildState();
+  const draft = loadSubmitDraft('flashback');
+  if (draft) restoreModalBuildFromDraft(draft);
+  else resetModalBuildState();
+
+  const initialVerId = (draft?.version && state.fbVersions.some((v) => v.id === draft.version)) ? draft.version : state.fbVersionId;
+  const verStages = standardStages(initialVerId);
+  const initialStageId = (draft?.stage && verStages.some((s) => s.id === draft.stage)) ? draft.stage : (verStages.some((s) => s.id === state.fbStageId) ? state.fbStageId : (verStages[0]?.id || ''));
+  const initialGroup = (draft?.group && Object.hasOwn(DIVISIONS, draft.group)) ? draft.group : state.fbGroup;
+  const initialRounds = (draft && /^[0-6]$/.test(String(draft.rounds ?? ''))) ? String(draft.rounds) : '';
+  const draftBanner = draft
+    ? `<div class="draft-restore-bar" id="submitDraftBar"><span>✦ 已自动恢复上次未提交草稿（请重新选择通关截图）</span><button type="button" class="text-link-btn" data-clear-draft="flashback">清空草稿</button></div>`
+    : '';
+
   openModal(`
     <div class="modal-eyebrow">FLASHBACK ARCHIVE · SUBMIT</div>
     <h2>提交焦点闪回成绩</h2>
@@ -3544,6 +3678,7 @@ function openFbSubmitModal() {
         选择通关截图可预填识别到的关卡、回合和部分角色、心相。仅收录 0–6 回合有效成绩，请核对后补填，确认期次和塑造，并勾选主 C。
       </small>
     </div>
+    ${draftBanner}
     <form id="fbSubmitForm">
       <div class="field">
         <label for="fbFormProof">通关截图 *</label>
@@ -3554,26 +3689,31 @@ function openFbSubmitModal() {
       </div>
       <div class="form-grid">
         <div class="field"><label for="fbNick">玩家昵称 *</label><input id="fbNick" name="nickname" readonly value="${esc(state.profile.display_name)}" /></div>
-        <div class="field"><label for="fbFormVersion">游戏版本 *</label><select id="fbFormVersion" name="version">${optionsHtml(state.fbVersions.map((v) => [v.id, v.label]), state.fbVersionId)}</select></div>
+        <div class="field"><label for="fbFormVersion">游戏版本 *</label><select id="fbFormVersion" name="version">${optionsHtml(state.fbVersions.map((v) => [v.id, v.label]), initialVerId)}</select></div>
       </div>
       <div class="form-grid">
-        <div class="field"><label for="fbFormStage">挑战关卡 *</label><select id="fbFormStage" name="stage">${fbStageOptionsHtml(state.fbVersionId)}</select></div>
-        <div class="field"><label for="fbFormGroup">塑造分组 *</label><select id="fbFormGroup" name="group">${optionsHtml(Object.entries(DIVISIONS), state.fbGroup)}</select></div>
+        <div class="field"><label for="fbFormStage">挑战关卡 *</label><select id="fbFormStage" name="stage">${optionsHtml(verStages.map((s) => [s.id, s.name]), initialStageId)}</select></div>
+        <div class="field"><label for="fbFormGroup">塑造分组 *</label><select id="fbFormGroup" name="group">${optionsHtml(Object.entries(DIVISIONS), initialGroup)}</select></div>
       </div>
-      <div class="field"><label for="fbFormRounds">通关回合 *</label><select id="fbFormRounds" name="rounds" required><option value="">请选择回合数</option>${Array.from({ length: 7 }, (_, n) => `<option value="${n}">${n} 回合</option>`).join('')}</select></div>
-      ${resonanceChoice(state.fbGroup)}
+      <div class="field"><label for="fbFormRounds">通关回合 *</label><select id="fbFormRounds" name="rounds" required><option value="">请选择回合数</option>${Array.from({ length: 7 }, (_, n) => `<option value="${n}"${initialRounds === String(n) ? ' selected' : ''}>${n} 回合</option>`).join('')}</select></div>
+      ${resonanceChoice(initialGroup, Boolean(draft?.resonanceTen))}
       ${renderTeamBuilderFieldHtml()}
       <div class="field">
         <label for="fbFormLink">相关链接（选填）</label>
-        <input id="fbFormLink" name="relatedUrl" type="url" maxlength="2048" placeholder="https://" />
+        <input id="fbFormLink" name="relatedUrl" type="url" maxlength="2048" placeholder="https://" value="${esc(draft?.relatedUrl || '')}" />
       </div>
       ${contactField}
       <div class="form-actions">
+        <button type="button" class="ghost-btn" id="clearDraftBtn" data-clear-draft="flashback" ${draft ? '' : 'hidden'}>清空草稿</button>
         <button type="button" class="outline-btn" data-action="close-modal">取消</button>
         <button type="submit" class="copper-btn">确认提交 →</button>
       </div>
     </form>`, true);
-  bindFlashbackScreenshot($('#fbSubmitForm'));
+  const form = $('#fbSubmitForm');
+  if (draft?.contact && form?.elements?.namedItem('contact')) {
+    form.elements.namedItem('contact').value = draft.contact;
+  }
+  bindFlashbackScreenshot(form);
 }
 
 async function handleFbSubmit(form) {
@@ -3636,6 +3776,7 @@ async function handleFbSubmit(form) {
     }
     throw err;
   }
+  clearSubmitDraft('flashback');
   closeModal();
   await loadAllData();
   toast('已提交，可在「我的投稿」查看审核进度。');
@@ -4503,6 +4644,14 @@ document.addEventListener('click', async (ev) => {
     if (action === 'close-char-picker') { closeCharPicker(); return; }
     if (action === 'close-psy-picker') { closePsychubePicker(); return; }
     if (action === 'close-modal') { closeModal(); return; }
+    if (btn.dataset.clearDraft) {
+      const board = btn.dataset.clearDraft;
+      clearSubmitDraft(board);
+      if (board === 'mane') openManeSubmitModal();
+      else if (board === 'flashback') openFbSubmitModal();
+      toast('已清空未提交草稿。');
+      return;
+    }
     if (action === 'my-submissions' || btn.dataset.progressBoard) {
       openMySubmissions(btn.dataset.progressBoard || state.mode);
       return;
@@ -4735,6 +4884,8 @@ document.addEventListener('change', (ev) => {
     if (box) box.hidden = !isZero;
     if (cb) { cb.disabled = !isZero; if (!isZero) cb.checked = false; }
   }
+  const draftForm = t.closest?.('#maneSubmitForm, #fbSubmitForm');
+  if (draftForm && t.type !== 'file') saveSubmitDraftFromForm(draftForm);
 });
 
 document.addEventListener('input', (ev) => {
@@ -4755,6 +4906,8 @@ document.addEventListener('input', (ev) => {
     if (el) { el.focus(); el.setSelectionRange(pos, pos); }
   } else if (t.dataset?.resSlot !== undefined) {
     modalBuildState.resonanceCodes[Number(t.dataset.resSlot)] = t.value;
+    const sf = t.closest?.('#maneSubmitForm, #fbSubmitForm');
+    if (sf) saveSubmitDraftFromForm(sf);
   } else if (t.id === 'charPickerSearch') {
     if (!ev.isComposing && charPickerState.query !== t.value) {
       charPickerState.query = t.value;
@@ -4765,6 +4918,9 @@ document.addEventListener('input', (ev) => {
       psyPickerState.query = t.value;
       refreshPsychubePickerResults();
     }
+  } else {
+    const draftForm = t.closest?.('#maneSubmitForm, #fbSubmitForm');
+    if (draftForm && t.type !== 'file') saveSubmitDraftFromForm(draftForm);
   }
 });
 
@@ -4931,10 +5087,21 @@ document.addEventListener('keydown', (ev) => {
   }
 });
 
+let overlayDownTargetId = '';
+document.addEventListener('pointerdown', (ev) => {
+  overlayDownTargetId = ev.target?.id || '';
+});
+
 document.addEventListener('click', (ev) => {
-  if (ev.target.id === 'charPickerOverlay') closeCharPicker();
-  else if (ev.target.id === 'psyPickerOverlay') closePsychubePicker();
-  else if (ev.target.id === 'modalOverlay') closeModal();
+  const id = ev.target?.id;
+  if (!id || id !== overlayDownTargetId) return;
+  if (id === 'charPickerOverlay') closeCharPicker();
+  else if (id === 'psyPickerOverlay') closePsychubePicker();
+  else if (id === 'modalOverlay') {
+    // 投稿/编辑等含表单弹窗禁止点击空白遮罩误关，仅可通过右上角 × 或「取消」关闭
+    if ($('#modalOverlay form')) return;
+    closeModal();
+  }
 });
 
 window.addEventListener('hashchange', () => {
