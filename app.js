@@ -38,7 +38,7 @@ import {
   mountSubmissionProgress,
   showRejectionForm
 } from './submission-progress.js';
-import { validateLineup } from './flashback-logic.mjs';
+import { canonicalTeam, validateLineup } from './flashback-logic.mjs';
 import {beijingDayRange, beijingTime, exportManeWorkbook, rankManeCarryTotals, todayInBeijing} from './mane-reports.js?v=20261123-today';
 
 const $ = (sel) => document.querySelector(sel);
@@ -865,9 +865,9 @@ async function loadAllData() {
       checked(sb.from('versions').select('id,code,label,created_at')),
       checked(sb.from('stages').select('id,version_id,stage_no,name,challenge_id')),
       loadPages('leaderboard_records', ['id']),
-      loadPages('player_ranking', ['player_id']),
+      loadPages('flashback_player_rankings_by_scope', ['version_id', 'player_id']),
       checked(sb.from('historical_records').select('id,stage_id,group_code,display_order,carry_names,lineup_label,credited_player')),
-      checked(sb.from('carry_rankings_by_scope').select('version_id,carry_name,appearance_count,challenge_count'))
+      loadPages('carry_rankings_by_scope', ['version_id', 'carry_name'], 'version_id,carry_name,challenge_count')
     ]);
 
     state.maneMaps = (maneMaps || []).sort((a, b) =>
@@ -886,12 +886,7 @@ async function loadAllData() {
     state.fbRecords = fbRecords || [];
     state.fbArchives = fbArchives || [];
     state.fbCarries = fbCarries || [];
-    state.fbPlayers = (fbPlayers || []).sort((a, b) =>
-      (b.historical_count - a.historical_count) ||
-      (b.current_count - a.current_count) ||
-      String(a.display_name).localeCompare(String(b.display_name), 'zh-CN') ||
-      String(a.player_id).localeCompare(String(b.player_id))
-    );
+    state.fbPlayers = fbPlayers || [];
 
     if (state.maneMapId) {
       const matchedMap = state.maneMaps.find((m) => m.id === state.maneMapId);
@@ -1294,7 +1289,7 @@ function renderMasthead() {
       </div>`;
   } else {
     const activeVer = state.fbVersions.find((v) => v.id === state.fbVersionId) || state.fbVersions[0];
-    const activePlayers = state.fbPlayers.filter((p) => p.historical_count || p.current_count).length;
+    const activePlayers = state.fbPlayers.filter((p) => p.version_id === null).length;
     const peak = findFlashbackSitewidePeak();
     const peakSource = peak ? `${peak.stage.name} · ${DIVISIONS[peak.rec.group_code]}` : '限定 0–6 回合';
 
@@ -2329,8 +2324,8 @@ function renderFlashbackWorkspace() {
           </article>
           <article class="rule-card">
             <span class="rule-num">02</span>
-            <h3>荣耀从未消失</h3>
-            <p>被后来者刷新超越的纪录不再占榜，但曾经夺得的有效历史荣誉仍永久计入玩家累计上榜次数。</p>
+            <h3>上榜次数</h3>
+            <p>各期只统计仍列在该期榜单上的成绩。同一期内被超越后，原成绩从上榜次数中扣除。</p>
           </article>
         </div>
       </div>
@@ -2348,6 +2343,18 @@ function renderFlashbackCarries() {
   const maxChallenges = versionId
     ? standardStages(versionId).length
     : new Set(state.fbStages.map((s) => s.challenge_id)).size;
+  const stages = new Map(state.fbStages.map((stage) => [stage.id, stage]));
+  const winningLineups = new Map();
+  for (const record of state.fbRecords) {
+    if (versionId && record.version_id !== versionId) continue;
+    const challenge = stages.get(record.stage_id)?.challenge_id || record.stage_id;
+    const lineup = JSON.stringify([challenge, record.group_code, record.team_key || canonicalTeam(record.team)]);
+    for (const name of splitCarries(record.carry_name)) {
+      const key = canonicalCharacterKey(name);
+      if (!winningLineups.has(key)) winningLineups.set(key, new Set());
+      winningLineups.get(key).add(lineup);
+    }
+  }
 
   // 按统一角色 ID 合并焦点闪回主 C 异体/简称写法
   const merged = new Map();
@@ -2360,12 +2367,11 @@ function renderFlashbackCarries() {
       merged.set(key, {
         carry_name: displayName,
         rawNames: new Set([row.carry_name]),
-        appearance_count: Number(row.appearance_count || 0),
+        appearance_count: winningLineups.get(key)?.size || 0,
         challenge_count: Number(row.challenge_count || 0)
       });
     } else {
       prev.rawNames.add(row.carry_name);
-      prev.appearance_count += Number(row.appearance_count || 0);
       prev.challenge_count = Math.min(maxChallenges || 999, Math.max(prev.challenge_count, Number(row.challenge_count || 0)));
     }
   }
@@ -2430,13 +2436,28 @@ function renderFlashbackCarries() {
           </div>`
         : '<div class="empty-state"><span class="empty-glyph">◇</span><h3>暂无可统计成绩</h3></div>'
       }
-      <div class="board-foot"><span>上榜次数按「关卡 × 塑造组 × 配队」去重；通关数按关卡去重，异体/简称角色已自动合并。</span></div>
+      <div class="board-foot"><span>上榜次数仅统计各期榜单保留的成绩，按「关卡 × 塑造组 × 配队」去重。通关数按关卡去重。</span></div>
     </div>`;
 }
 
 function renderFlashbackPlayers() {
-  const rows = state.fbPlayers.filter((p) => p.historical_count || p.current_count);
+  const version = state.fbVersions.find((v) => v.id === state.fbVersionId);
+  const period = new Map(state.fbPlayers.filter((p) => p.version_id === state.fbVersionId)
+    .map((p) => [p.player_id, p.appearance_count]));
+  const rows = state.fbPlayers.filter((p) => p.version_id === null)
+    .map((p) => ({...p, periodCount: period.get(p.player_id) || 0}))
+    .sort((a, b) => (b.periodCount - a.periodCount) || (b.appearance_count - a.appearance_count) ||
+      String(a.display_name).localeCompare(String(b.display_name), 'zh-CN') ||
+      String(a.player_id).localeCompare(String(b.player_id)));
   return `
+    <div class="section-bar">
+      <div class="fb-version-picker">
+        <label for="fbVersionSelect" class="fb-version-label">统计期次</label>
+        <select id="fbVersionSelect" class="filter-select fb-version-select">
+          ${optionsHtml(state.fbVersions.map((v) => [v.id, v.label]), state.fbVersionId)}
+        </select>
+      </div>
+    </div>
     <div class="board-panel">
       <div class="board-header">
         <div class="board-title-stack">
@@ -2446,7 +2467,7 @@ function renderFlashbackPlayers() {
             <span class="boss-en-sub">All-Time Honors</span>
           </div>
           <div class="paper-tag-row">
-            <span class="paper-tag dark">按历史上榜次数降序 · 同分优先比较当前持榜数</span>
+            <span class="paper-tag dark">${esc(version?.label || '所选期次')} · 按该期持榜数降序 · 同分比较历期合计</span>
           </div>
         </div>
         <span class="count-tag">${rows.length} 位荣耀玩家</span>
@@ -2454,14 +2475,14 @@ function renderFlashbackPlayers() {
       ${rows.length
         ? `<div class="table-scroll">
             <table class="archive-table table-fb-players">
-              <thead><tr><th style="width:76px">名次</th><th>玩家昵称</th><th class="num-col">历史上榜次数</th><th class="num-col">当前持榜数量</th></tr></thead>
+              <thead><tr><th style="width:76px">名次</th><th>玩家昵称</th><th class="num-col">所选期持榜数</th><th class="num-col">历期持榜总数</th></tr></thead>
               <tbody>
                 ${rows.map((p, idx) => `
                   <tr>
                     <td class="cell-rank">${renderRankBadge(idx + 1)}</td>
                     <td class="cell-entity"><strong class="player-name">${esc(p.display_name)}</strong></td>
-                    <td class="num-col cell-primary" data-label="历史上榜"><span class="score-value">${p.historical_count}</span> <span style="color:var(--ink-muted)">次</span></td>
-                    <td class="num-col cell-secondary" data-label="当前持榜" style="color:var(--linen)">${p.current_count} 个</td>
+                    <td class="num-col cell-primary" data-label="所选期持榜"><span class="score-value">${p.periodCount}</span> <span style="color:var(--ink-muted)">次</span></td>
+                    <td class="num-col cell-secondary" data-label="历期持榜" style="color:var(--linen)">${p.appearance_count} 次</td>
                   </tr>`).join('')}
               </tbody>
             </table>
@@ -2472,13 +2493,13 @@ function renderFlashbackPlayers() {
     <div class="two-cards">
       <article class="rule-card">
         <span class="rule-num">∞</span>
-        <h3>历史上榜次数</h3>
-        <p>曾经成为某「版本／关卡／塑造组／具体阵容」的纪录保持者，即记一项历史荣誉。重复夺回同一项不重复累计。</p>
+        <h3>所选期持榜数</h3>
+        <p>统计所选期次里当前仍在榜的成绩。同一期内被超越并下榜后，该成绩从统计中扣除。</p>
       </article>
       <article class="rule-card">
         <span class="rule-num">✦</span>
-        <h3>当前持榜数量</h3>
-        <p>目前仍保持最佳回合的阵容数量，随每次审核通过或撤销实时重算。</p>
+        <h3>历期持榜总数</h3>
+        <p>汇总各期榜单保留的成绩，同一玩家在重复关卡里的同塑造、同阵容只算一次。</p>
       </article>
     </div>`;
 }
@@ -2490,7 +2511,7 @@ function renderFlashbackRules() {
     ['03', '零至六回合', '只能提交 0、1、2、3、4、5、6 回合的有效成绩，须上传通关截图供管理员核验。'],
     ['04', '阵容识别', '提交主 C 与实际上场的完整队伍。相同角色组合视为同队，与角色填写顺序无关；主 C 并不拆分榜单。'],
     ['05', '唯一保持者', '同队仅有回合最少者上榜；同回合数先提交者获胜。以数据库记录的提交时间为准，不受审核顺序影响。'],
-    ['06', '历史荣誉', '曾夺得同一「版本／关卡／塑造／队伍」最佳纪录，历史次数最多计一次，重夺不叠加。被取消的无效成绩不计荣誉。']
+    ['06', '上榜次数', '每期按该期榜单保留的成绩计数。同一期内掉榜的成绩从次数中扣除，历期合计对重复关卡的同塑造同阵容去重。']
   ];
   return `
     <div class="rules-grid">
