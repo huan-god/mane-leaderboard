@@ -15,7 +15,7 @@ import {
   resolveCharacter,
   resolveManeGrade,
   toRoman
-} from './arcanists.js';
+} from './arcanists.js?v=20261125-opt1';
 import {
   resolveFlashbackStageMechanics,
   resolveManeBossMechanics
@@ -39,7 +39,7 @@ import {
   showRejectionForm
 } from './submission-progress.js';
 import { canonicalTeam, validateLineup } from './flashback-logic.mjs';
-import {beijingDayRange, beijingTime, exportManeWorkbook, rankManeCarryTotals, todayInBeijing} from './mane-reports.js?v=20261123-fix1';
+import {beijingDayRange, beijingTime, exportManeWorkbook, rankManeCarryTotals, shiftBeijingDay, todayInBeijing} from './mane-reports.js?v=20261125-opt1';
 
 const $ = (sel) => document.querySelector(sel);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (ch) =>
@@ -90,7 +90,7 @@ const DEFAULT_MODE = location.pathname.toLowerCase().includes('flashback') ? 'fl
 const state = {
   mode: DEFAULT_MODE,     // 'mane' | 'flashback'
   manePage: 'scores',
-  maneDaily: {division: '', map: ''},
+  maneDaily: { date: '', division: '', map: '' },
   fbPage: 'leaderboard',  // 'leaderboard' | 'carries' | 'players' | 'rules'
 
   connected: false,
@@ -1019,22 +1019,37 @@ function readHash() {
   const [pathPart, queryPart = ''] = raw.split('?');
   const [m, p] = pathPart.split('/');
   const params = new URLSearchParams(queryPart);
+  const rec = params.get('rec');
 
   if (m === 'mane') {
     state.mode = 'mane';
     if (['scores', 'totals', 'daily', 'players', 'rules'].includes(p)) state.manePage = p;
-    const sec = params.get('sec');
-    if (sec === 'new' || sec === 'rerun') state.maneSection = sec;
-    const div = params.get('div');
-    if (div === 'zero' || div === 'max') state.maneDivision = div;
-    const mapId = params.get('map');
-    if (mapId) state.maneMapId = mapId;
-    const rec = params.get('rec');
+    if (state.manePage === 'daily') {
+      const d = params.get('date');
+      state.maneDaily.date = (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) ? d : '';
+      const div = params.get('div');
+      state.maneDaily.division = (div === 'zero' || div === 'max') ? div : '';
+      state.maneDaily.map = params.get('map') || '';
+    } else if (state.manePage === 'players') {
+      const scope = params.get('scope');
+      if (['all', 'new', 'rerun'].includes(scope)) state.manePlayerScope = scope;
+      const div = params.get('div');
+      if (['all', 'zero', 'max'].includes(div)) state.manePlayerDiv = div;
+    } else {
+      const sec = params.get('sec');
+      if (sec === 'new' || sec === 'rerun') state.maneSection = sec;
+      const div = params.get('div');
+      if (div === 'zero' || div === 'max') state.maneDivision = div;
+      const mapId = params.get('map');
+      if (mapId) state.maneMapId = mapId;
+    }
+    state.maneMechOpen = params.get('mech') === '1';
     if (rec) {
       state.highlightRecordId = `mane-${rec}`;
       pendingScrollRecordId = `mane-${rec}`;
+    } else {
+      state.highlightRecordId = '';
     }
-    if (params.get('mech') === '1') state.maneMechOpen = true;
   } else if (m === 'flashback') {
     state.mode = 'flashback';
     if (['leaderboard', 'carries', 'players', 'rules'].includes(p)) state.fbPage = p;
@@ -1044,21 +1059,68 @@ function readHash() {
     if (stage) state.fbStageId = stage;
     const grp = params.get('grp');
     if (grp === 'zero' || grp === 'max') state.fbGroup = grp;
-    const rec = params.get('rec');
+    const scope = params.get('scope');
+    if (scope === 'period' || scope === 'all') state.fbCarryScope = scope;
+    const metric = params.get('metric');
+    if (metric === 'appearance_count' || metric === 'challenge_count') state.fbCarryMetric = metric;
+    state.fbResonanceOnly = !rec && state.fbGroup === 'zero' && params.get('res10') === '1';
+    state.fbMechOpen = params.get('mech') === '1';
     if (rec) {
-      state.fbResonanceOnly = false;
       state.highlightRecordId = `fb-${rec}`;
       pendingScrollRecordId = `fb-${rec}`;
+    } else {
+      state.highlightRecordId = '';
     }
-    if (params.get('mech') === '1') state.fbMechOpen = true;
   }
 }
 
 function writeHash() {
-  // 仅当无直达定位参数时同步简短哈希，避免覆盖刚打开的分享链接参数
-  if ((location.hash || '').includes('?rec=') && state.highlightRecordId) return;
+  // 首次加载数据尚未就绪时暂不重写哈希，避免覆盖传入深链参数
+  if (state.loading && !state.maneMaps.length && !state.fbVersions.length) return;
   const page = state.mode === 'mane' ? state.manePage : state.fbPage;
-  const next = `#${state.mode}/${page}`;
+  const params = new URLSearchParams();
+
+  if (state.mode === 'mane') {
+    if (page === 'scores') {
+      params.set('sec', state.maneSection);
+      if (state.maneMapId) params.set('map', state.maneMapId);
+      params.set('div', state.maneDivision);
+      if (state.maneMechOpen) params.set('mech', '1');
+      if (state.highlightRecordId.startsWith('mane-')) {
+        params.set('rec', state.highlightRecordId.slice(5));
+      }
+    } else if (page === 'totals') {
+      params.set('sec', state.maneSection);
+      params.set('div', state.maneDivision);
+    } else if (page === 'daily') {
+      if (state.maneDaily.date) params.set('date', state.maneDaily.date);
+      if (state.maneDaily.division) params.set('div', state.maneDaily.division);
+      if (state.maneDaily.map) params.set('map', state.maneDaily.map);
+    } else if (page === 'players') {
+      if (state.manePlayerScope !== 'all') params.set('scope', state.manePlayerScope);
+      if (state.manePlayerDiv !== 'all') params.set('div', state.manePlayerDiv);
+    }
+  } else {
+    if (page === 'leaderboard') {
+      if (state.fbVersionId) params.set('ver', state.fbVersionId);
+      if (state.fbStageId) params.set('stage', state.fbStageId);
+      params.set('grp', state.fbGroup);
+      if (state.fbGroup === 'zero' && state.fbResonanceOnly) params.set('res10', '1');
+      if (state.fbMechOpen) params.set('mech', '1');
+      if (state.highlightRecordId.startsWith('fb-')) {
+        params.set('rec', state.highlightRecordId.slice(3));
+      }
+    } else if (page === 'carries') {
+      if (state.fbCarryScope !== 'period') params.set('scope', state.fbCarryScope);
+      if (state.fbCarryScope === 'period' && state.fbVersionId) params.set('ver', state.fbVersionId);
+      if (state.fbCarryMetric !== 'appearance_count') params.set('metric', state.fbCarryMetric);
+    } else if (page === 'players') {
+      if (state.fbVersionId) params.set('ver', state.fbVersionId);
+    }
+  }
+
+  const qs = params.toString();
+  const next = `#${state.mode}/${page}${qs ? `?${qs}` : ''}`;
   if (location.hash !== next) {
     history.replaceState(null, '', next);
   }
@@ -1067,6 +1129,12 @@ function writeHash() {
 function buildRecordDeepLink(item) {
   const base = `${location.origin}${location.pathname}`;
   if (item.mode === 'mane') {
+    if (!item.rank && item.dailyDate) {
+      const p = new URLSearchParams({ date: item.dailyDate });
+      if (item.division) p.set('div', item.division);
+      if (item.mapId) p.set('map', item.mapId);
+      return `${base}#mane/daily?${p.toString()}`;
+    }
     const p = new URLSearchParams({
       sec: item.section || state.maneSection,
       map: item.mapId || state.maneMapId,
@@ -1694,6 +1762,8 @@ function renderFlashbackStageMechanicsDrawer(mech) {
 }
 
 /* ==================== 鬃毛邮报页面渲染 ==================== */
+let maneDailyLoadSeq = 0;
+
 async function loadManeDailyRows({date, division, mapIds}) {
   const [start, end] = beijingDayRange(date);
   const rows = [];
@@ -1709,18 +1779,28 @@ async function loadManeDailyRows({date, division, mapIds}) {
 }
 
 function renderManeDaily() {
-  const {division, map} = state.maneDaily;
+  const {date, division, map} = state.maneDaily;
   const today = todayInBeijing();
+  const yesterday = shiftBeijingDay(today, -1);
+  const selectedDate = (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) ? date : today;
+  const dayHint = selectedDate === today ? ' · 今日' : (selectedDate === yesterday ? ' · 昨日' : '');
   const mapOptions = state.maneMaps.map((m) => [m.id, `${m.edition} · ${m.name}`]);
   return `<section class="board-panel">
     <div class="board-header">
       <div class="board-title-stack">
         <h2>每日新分</h2>
-        <p class="board-subtitle">${today}（北京时间）审核通过的成绩</p>
+        <p class="board-subtitle">${selectedDate}（北京时间${dayHint}）审核通过的成绩</p>
       </div>
       <button type="button" class="outline-btn" data-action="refresh-mane-daily">刷新</button>
     </div>
-    <div class="form-grid" style="padding:16px 16px 0">
+    <div class="daily-filter-grid">
+      <div class="field"><label for="maneDailyDate">日期（北京时间）</label>
+        <div class="daily-date-controls">
+          <button type="button" class="daily-quick-btn ${selectedDate === today ? 'active' : ''}" data-mane-daily-date="${today}">今天</button>
+          <button type="button" class="daily-quick-btn ${selectedDate === yesterday ? 'active' : ''}" data-mane-daily-date="${yesterday}">昨天</button>
+          <input id="maneDailyDate" type="date" data-mane-daily="date" value="${selectedDate}" max="${today}" aria-label="选择北京时间日期" />
+        </div>
+      </div>
       <div class="field"><label for="maneDailyDivision">塑造</label>
         <select id="maneDailyDivision" data-mane-daily="division">${optionsHtml([['', '全部塑造'], ...Object.entries(DIVISIONS)], division)}</select>
       </div>
@@ -1728,7 +1808,7 @@ function renderManeDaily() {
         <select id="maneDailyMap" data-mane-daily="map">${optionsHtml([['', '全部关卡'], ...mapOptions], map)}</select>
       </div>
     </div>
-    <div id="maneDailyResults" data-date="${today}" aria-live="polite"><p class="board-foot">${state.loading ? '正在连接档案库…' : '正在读取成绩…'}</p></div>
+    <div id="maneDailyResults" data-date="${selectedDate}" aria-live="polite"><p class="board-foot">${state.loading ? '正在连接档案库…' : '正在读取成绩…'}</p></div>
   </section>`;
 }
 
@@ -1737,29 +1817,100 @@ async function fillManeDailyResults(host) {
     if (!state.loading) host.textContent = '暂时无法连接档案库。';
     return;
   }
+  const seq = ++maneDailyLoadSeq;
+  const selectedDate = host.dataset.date;
   const {division, map} = state.maneDaily;
   try {
-    const rows = await loadManeDailyRows({date: host.dataset.date, division, mapIds: map ? [map] : []});
-    if (!host.isConnected) return;
+    const rows = await loadManeDailyRows({date: selectedDate, division, mapIds: map ? [map] : []});
+    if (!host.isConnected || seq !== maneDailyLoadSeq) return;
     if (!rows.length) {
       host.innerHTML = '<div class="empty-state"><h3>当天暂无符合条件的成绩</h3></div>';
       return;
     }
+
+    const scoreById = new Map();
+    const rankById = new Map();
+    const byBoard = new Map();
+    for (const r of state.maneScores) {
+      scoreById.set(r.id, r);
+      const boardKey = `${r.map_id}::${r.division}`;
+      if (!byBoard.has(boardKey)) byBoard.set(boardKey, []);
+      byBoard.get(boardKey).push(r);
+    }
+    for (const list of byBoard.values()) {
+      list.sort(compareManeScore);
+      list.forEach((r, idx) => rankById.set(r.id, idx + 1));
+    }
+
+    const extraBuildsById = new Map();
+    const missingIds = rows.filter((r) => !scoreById.has(r.id)).map((r) => r.id);
+    if (missingIds.length) {
+      try {
+        for (let i = 0; i < missingIds.length; i += 200) {
+          const chunk = missingIds.slice(i, i + 200);
+          const extra = await checked(
+            sb.from('mane_entries').select('id,team_psychubes,team_resonance_codes').in('id', chunk)
+          );
+          for (const entry of extra || []) extraBuildsById.set(entry.id, entry);
+        }
+      } catch (err) {
+        console.warn('未能读取部分每日新分心相与共鸣配置：', err);
+      }
+      if (!host.isConnected || seq !== maneDailyLoadSeq) return;
+    }
+
     const mapById = new Map(state.maneMaps.map((m) => [m.id, m]));
+    const rowsHtml = rows.map((row) => {
+      const mapObj = mapById.get(row.map_id);
+      const section = mapObj?.section || 'new';
+      const bossAsset = resolveBossAsset(mapObj?.name || '', section);
+      const liveRow = scoreById.get(row.id);
+      const liveRank = rankById.get(row.id) || 0;
+      const { psychubes, resonanceCodes } = extractRecordBuilds(liveRow || extraBuildsById.get(row.id) || row);
+      const hasBuilds = psychubes.some(Boolean) || resonanceCodes.some(Boolean);
+      const canonicalCarryText = formatCanonicalCarry(row.carry);
+      const canonicalTeam = (row.team || []).map(canonicalDisplayName);
+      const pid = `mane-daily-${row.id}`;
+      posterIndex.set(pid, {
+        mode: 'mane',
+        recordId: row.id,
+        dailyDate: selectedDate,
+        section,
+        mapId: row.map_id,
+        division: row.division,
+        rank: liveRank,
+        title: mapObj?.name || '鬃毛邮报',
+        bossEn: bossAsset.en,
+        bossThumb: bossAsset.thumb,
+        subtitle: `${MANE_SECTIONS[section] || '鬃毛邮报'} · ${DIVISIONS[row.division] || row.division}`,
+        player: row.display_name,
+        carry: canonicalCarryText,
+        team: row.team,
+        canonicalTeam,
+        psychubes,
+        resonanceCodes,
+        score: row.score,
+        date: beijingTime(row.approved_at),
+        related_url: row.related_url
+      });
+      return `<tr>
+        <td class="cell-daily-time" data-label="时间">${esc(beijingTime(row.approved_at).split(' ')[1])}</td>
+        <td class="cell-daily-map" data-label="关卡">${esc(mapObj?.name || '')}</td>
+        <td class="cell-daily-div" data-label="塑造">${esc(DIVISIONS[row.division] || row.division)}</td>
+        <td class="cell-daily-player" data-label="玩家">${esc(row.display_name)}</td>
+        <td class="cell-daily-lineup" data-label="阵容"><strong>${esc(canonicalCarryText)}</strong> ${hasBuilds ? '<span class="row-build-tag">心相·共鸣</span>' : ''}<br>${esc(canonicalTeam.join('、'))} ${safeLinkHtml(row.related_url)}</td>
+        <td class="num-col cell-daily-score" data-label="积分"><span class="score-value">${formatScore(row.score)}</span></td>
+        <td class="cell-daily-actions" data-label="操作"><span class="daily-actions-wrap"><button type="button" class="card-trigger daily-action-btn" data-poster="${esc(pid)}">查看</button>${liveRow ? `<button type="button" class="text-link-btn" data-jump-mane-record="${esc(row.id)}" data-jump-section="${esc(section)}" data-jump-map="${esc(row.map_id)}" data-jump-div="${esc(row.division)}">跳榜 ↗</button>` : ''}</span></td>
+      </tr>`;
+    }).join('');
+
     host.innerHTML = `<p class="board-foot">共 ${rows.length} 条已通过成绩</p>
       <div class="table-scroll"><table class="archive-table table-mane-daily">
-        <thead><tr><th>时间</th><th>关卡</th><th>塑造</th><th>玩家</th><th>主 C / 阵容</th><th class="num-col">积分</th></tr></thead>
-        <tbody>${rows.map((row) => `<tr>
-          <td class="cell-daily-time" data-label="时间">${esc(beijingTime(row.approved_at).split(' ')[1])}</td>
-          <td class="cell-daily-map" data-label="关卡">${esc(mapById.get(row.map_id)?.name || '')}</td>
-          <td class="cell-daily-div" data-label="塑造">${esc(DIVISIONS[row.division] || row.division)}</td>
-          <td class="cell-daily-player" data-label="玩家">${esc(row.display_name)}</td>
-          <td class="cell-daily-lineup" data-label="阵容"><strong>${esc(formatCanonicalCarry(row.carry))}</strong><br>${esc((row.team || []).map(canonicalDisplayName).join('、'))} ${safeLinkHtml(row.related_url)}</td>
-          <td class="num-col cell-daily-score" data-label="积分"><span class="score-value">${formatScore(row.score)}</span></td>
-        </tr>`).join('')}</tbody>
+        <thead><tr><th>时间</th><th>关卡</th><th>塑造</th><th>玩家</th><th>主 C / 阵容</th><th class="num-col">积分</th><th style="text-align:right">操作</th></tr></thead>
+        <tbody>${rowsHtml}</tbody>
       </table></div>`;
   } catch {
-    if (host.isConnected) host.textContent = '成绩暂时无法读取，请点击刷新。';
+    if (host.isConnected && seq === maneDailyLoadSeq) host.textContent = '成绩暂时无法读取，请点击刷新。';
   }
 }
 
@@ -1768,7 +1919,7 @@ function renderManeWorkspace() {
   const newMaps = activeManeMaps('new');
   const rerunMaps = activeManeMaps('rerun');
   const maps = activeManeMaps(state.maneSection);
-  if (!maps.some((m) => m.id === state.maneMapId)) state.maneMapId = maps[0]?.id || '';
+  if (state.maneMaps.length && !maps.some((m) => m.id === state.maneMapId)) state.maneMapId = maps[0]?.id || '';
 
   const sectionBar = `
     <div class="section-bar">
@@ -2102,12 +2253,13 @@ function renderManeTotals(latestEdition, sectionMaps = []) {
                     <tr>
                       <td class="cell-rank">${renderRankBadge(idx + 1)}</td>
                       <td class="cell-entity">
-                        <div style="display:flex;align-items:center;gap:10px">
+                        <button type="button" class="entity-jump-btn" data-jump-mane-carry="${esc(row.carry_key)}" data-jump-carry-name="${esc(row.carry_name)}" data-jump-map="${esc(row.map_scores?.[0]?.map_id || '')}" title="点击跳转并筛选主 C：${esc(row.carry_name)}">
                           ${renderCarryAvatarHtml(row.carry_name)}
-                          <div style="min-width:0">
+                          <span style="min-width:0">
                             <strong style="font-family:var(--font-serif);font-size:15px">${esc(row.carry_name)}</strong>
-                          </div>
-                        </div>
+                          </span>
+                          <span class="entity-jump-arrow" aria-hidden="true">↗</span>
+                        </button>
                       </td>
                       <td class="cell-detail">
                         <details class="map-breakdown">
@@ -2116,6 +2268,7 @@ function renderManeTotals(latestEdition, sectionMaps = []) {
                             ${(row.map_scores || []).map((m) => `
                               <li>
                                 <strong>${esc(m.name)}</strong> · <span style="display:inline;color:var(--copper-bright)">${formatScore(m.score)}</span>
+                                <button type="button" class="text-link-btn" style="margin-left:8px" data-jump-mane-carry="${esc(row.carry_key)}" data-jump-carry-name="${esc(row.carry_name)}" data-jump-map="${esc(m.map_id)}">看此图 ↗</button>
                                 <span>调查员：${esc(m.player)} · 配队：${esc((m.team || []).map(canonicalDisplayName).join('、'))}</span>
                               </li>`).join('')}
                           </ul>
@@ -2258,7 +2411,12 @@ function renderManePlayers() {
                 ${rows.map((p, idx) => `
                   <tr>
                     <td class="cell-rank">${renderRankBadge(idx + 1)}</td>
-                    <td class="cell-entity"><strong class="player-name">${esc(p.name)}</strong></td>
+                    <td class="cell-entity">
+                      <button type="button" class="entity-jump-btn" data-jump-mane-player="${esc(p.name)}" data-jump-section="${esc(p.entries[0]?.section || 'new')}" data-jump-map="${esc(p.entries[0]?.mapId || '')}" data-jump-div="${esc(p.entries[0]?.division || 'zero')}" title="点击跳转并筛选调查员：${esc(p.name)}">
+                        <strong class="player-name">${esc(p.name)}</strong>
+                        <span class="entity-jump-arrow" aria-hidden="true">↗</span>
+                      </button>
+                    </td>
                     <td class="cell-detail">
                       <div class="honor-badges-row">
                         ${p.firstCount ? `<span class="honor-chip gold">榜首 ×${p.firstCount}</span>` : ''}
@@ -2324,7 +2482,7 @@ function renderFlashbackWorkspace() {
 
   const ver = state.fbVersions.find((v) => v.id === state.fbVersionId);
   const stages = standardStages(state.fbVersionId);
-  if (!stages.some((s) => s.id === state.fbStageId)) state.fbStageId = stages[0]?.id || '';
+  if (state.fbVersions.length && !stages.some((s) => s.id === state.fbStageId)) state.fbStageId = stages[0]?.id || '';
   const stage = stages.find((s) => s.id === state.fbStageId);
   const stageMech = resolveFlashbackStageMechanics(stage);
 
@@ -2398,6 +2556,7 @@ function renderFlashbackWorkspace() {
       canonicalTeam,
       psychubes,
       resonanceCodes,
+      resonanceTen: Boolean(record.group_code === 'zero' && record.resonance_ten),
       rounds: record.rounds,
       date: formatDateTime(record.created_at),
       related_url: record.related_url
@@ -2701,12 +2860,13 @@ function renderFlashbackCarries() {
                     <tr>
                       <td class="cell-rank">${renderRankBadge(idx + 1)}</td>
                       <td class="cell-entity">
-                        <div style="display:flex;align-items:center;gap:10px">
+                        <button type="button" class="entity-jump-btn" data-jump-fb-carry="${esc(canonicalCharacterKey(row.carry_name))}" data-jump-carry-name="${esc(row.carry_name)}" title="点击跳转并筛选主 C：${esc(row.carry_name)}">
                           ${renderCarryAvatarHtml(row.carry_name)}
-                          <div style="min-width:0">
+                          <span style="min-width:0">
                             <strong style="font-family:var(--font-serif);font-size:15px">${esc(row.carry_name)}</strong>
-                          </div>
-                        </div>
+                          </span>
+                          <span class="entity-jump-arrow" aria-hidden="true">↗</span>
+                        </button>
                       </td>
                       <td class="num-col cell-primary" data-label="${esc(metrics[primary])}"><span class="score-value">${row[primary]}</span></td>
                       <td class="num-col cell-secondary" data-label="${esc(metrics[secondary])}" style="color:var(--linen)">${row[secondary]}</td>
@@ -2760,7 +2920,12 @@ function renderFlashbackPlayers() {
                 ${rows.map((p, idx) => `
                   <tr>
                     <td class="cell-rank">${renderRankBadge(idx + 1)}</td>
-                    <td class="cell-entity"><strong class="player-name">${esc(p.display_name)}</strong></td>
+                    <td class="cell-entity">
+                      <button type="button" class="entity-jump-btn" data-jump-fb-player="${esc(p.display_name)}" title="点击跳转并筛选玩家：${esc(p.display_name)}">
+                        <strong class="player-name">${esc(p.display_name)}</strong>
+                        <span class="entity-jump-arrow" aria-hidden="true">↗</span>
+                      </button>
+                    </td>
                     <td class="num-col cell-primary" data-label="所选期持榜"><span class="score-value">${p.periodCount}</span> <span style="color:var(--ink-muted)">次</span></td>
                     <td class="num-col cell-secondary" data-label="历期持榜" style="color:var(--linen)">${p.appearance_count} 次</td>
                   </tr>`).join('')}
@@ -2899,16 +3064,32 @@ async function exportPosterPng(item) {
 
   ctx.fillStyle = '#5c4738';
   ctx.font = `500 17px ${serifFont}`;
-  ctx.fillText(item.subtitle || '', 58, 158);
+  const subText = item.subtitle || '';
+  ctx.fillText(subText, 58, 158);
+  if (!isMane && item.resonanceTen) {
+    const subW = ctx.measureText(subText).width;
+    const tagText = '✦ 全0塑 · 共鸣10';
+    ctx.font = `700 13px ${serifFont}`;
+    const tagW = ctx.measureText(tagText).width + 18;
+    const tagX = 58 + subW + 14;
+    const tagY = 140;
+    ctx.fillStyle = '#3d2c1b';
+    ctx.fillRect(tagX, tagY, tagW, 24);
+    ctx.strokeStyle = '#8d6423';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(tagX, tagY, tagW, 24);
+    ctx.fillStyle = '#f8db9e';
+    ctx.fillText(tagText, tagX + 9, 157);
+  }
 
   // 右上名次印章
   ctx.textAlign = 'right';
   ctx.fillStyle = isMane ? '#b93a2b' : '#8d6423';
   ctx.font = `700 58px ${displayFont}`;
-  ctx.fillText(`#${String(item.rank).padStart(2, '0')}`, W - 58, 124);
+  ctx.fillText(item.rank > 0 ? `#${String(item.rank).padStart(2, '0')}` : '每日', W - 58, 124);
   ctx.fillStyle = '#6b5241';
   ctx.font = `600 14px ${displayFont}`;
-  ctx.fillText('ARCHIVE RANK', W - 58, 152);
+  ctx.fillText(item.rank > 0 ? 'ARCHIVE RANK' : 'DAILY APPROVED', W - 58, 152);
   ctx.textAlign = 'left';
 
   // 分割线
@@ -3166,7 +3347,8 @@ async function exportPosterPng(item) {
   ctx.textAlign = 'left';
 
   const safeTitle = String(item.title || 'record').replace(/[\\/:*?"<>|\s]+/g, '-');
-  const fileName = `r1999-${item.mode}-${safeTitle}-rank${item.rank}.png`;
+  const rankSuffix = item.rank > 0 ? `rank${item.rank}` : 'daily';
+  const fileName = `r1999-${item.mode}-${safeTitle}-${rankSuffix}.png`;
   const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
   if (!blob) throw new Error('浏览器未能导出纪录图片。');
   const url = URL.createObjectURL(blob);
@@ -3219,10 +3401,20 @@ function openPoster(posterId) {
     : (item.team || []);
   const hasAnyBuilds = psychubes.some(Boolean) || resonanceCodes.some(Boolean);
   const slotCount = Math.max(slotNames.length, psychubes.length, resonanceCodes.length);
+  const nonEmptyRes = Array.from({ length: Math.min(4, slotCount) }, (_, idx) => ({
+    idx,
+    code: resonanceCodes[idx] || '',
+    name: slotNames[idx] || `${idx + 1}号位`
+  })).filter((entry) => entry.code);
 
   const buildsHtml = hasAnyBuilds
     ? `<div class="poster-builds-section">
-         <div class="poster-builds-heading">PSYCHUBES &amp; RESONANCE · 心相与共鸣配置</div>
+         <div class="poster-builds-header">
+           <div class="poster-builds-heading">PSYCHUBES &amp; RESONANCE · 心相与共鸣配置</div>
+           ${nonEmptyRes.length >= 2
+             ? `<button type="button" class="poster-res-copy-all" data-copy-all-res="${esc(posterId)}">一键复制全队共鸣码（${nonEmptyRes.length}条）</button>`
+             : ''}
+         </div>
          <div class="poster-builds-grid">
            ${Array.from({ length: Math.min(4, slotCount) }, (_, idx) => {
              const pName = psychubes[idx] || '';
@@ -3271,11 +3463,14 @@ function openPoster(posterId) {
         <div>
           <div class="poster-kicker">${isMane ? 'MANE’S BULLETIN · 鬃毛邮报' : 'FLASHBACK ARCHIVE · 焦点闪回'}</div>
           <h3>${esc(item.title)}</h3>
-          <div class="poster-sub">${esc(item.subtitle)}</div>
+          <div class="poster-sub-row">
+            <div class="poster-sub">${esc(item.subtitle)}</div>
+            ${!isMane && item.resonanceTen ? '<span class="poster-res10-badge">✦ 全0塑 · 共鸣10</span>' : ''}
+          </div>
         </div>
         <div class="poster-rank-box">
-          <div class="poster-rank-num">#${String(item.rank).padStart(2, '0')}</div>
-          <div class="poster-rank-label">RANK</div>
+          <div class="poster-rank-num">${item.rank > 0 ? `#${String(item.rank).padStart(2, '0')}` : '每日'}</div>
+          <div class="poster-rank-label">${item.rank > 0 ? 'RANK' : 'DAILY'}</div>
         </div>
       </div>
 
@@ -4280,12 +4475,12 @@ function openFbVersionEditor(versionId = '') {
 /* ==================== 总渲染入口 ==================== */
 function render() {
   posterIndex.clear();
-  writeHash();
   renderChrome();
   renderMasthead();
   $('#workspace').innerHTML = state.mode === 'mane'
     ? renderManeWorkspace()
     : renderFlashbackWorkspace();
+  writeHash();
   const dailyResults = $('#maneDailyResults');
   if (dailyResults) void fillManeDailyResults(dailyResults);
 
@@ -4379,6 +4574,111 @@ document.addEventListener('click', async (ev) => {
       pendingScrollRecordId = pid;
       render();
       toast('已跳转至最短回合纪录所在关卡。');
+      return;
+    }
+
+    if (btn.dataset.maneDailyDate) {
+      state.maneDaily.date = btn.dataset.maneDailyDate;
+      render();
+      return;
+    }
+    if (btn.dataset.jumpManeCarry) {
+      const carryKey = btn.dataset.jumpManeCarry;
+      const carryName = btn.dataset.jumpCarryName || '';
+      const preferredMap = btn.dataset.jumpMap || '';
+      const sectionMaps = activeManeMaps(state.maneSection);
+      const mapMatchesCarry = (mapId) => state.maneScores.some((r) =>
+        r.map_id === mapId &&
+        r.division === state.maneDivision &&
+        splitCarries(r.carry).some((c) => canonicalCharacterKey(c) === carryKey)
+      );
+      let targetMap = (preferredMap && sectionMaps.some((m) => m.id === preferredMap) && mapMatchesCarry(preferredMap))
+        ? preferredMap
+        : '';
+      if (!targetMap) {
+        const hit = sectionMaps.find((m) => mapMatchesCarry(m.id));
+        targetMap = hit?.id || (sectionMaps.some((m) => m.id === preferredMap) ? preferredMap : state.maneMapId);
+      }
+      state.mode = 'mane';
+      state.manePage = 'scores';
+      if (targetMap) state.maneMapId = targetMap;
+      state.maneRoleMode = 'carry';
+      state.maneCarry = carryKey;
+      state.maneAfflatus = '';
+      state.maneQuery = '';
+      state.highlightRecordId = '';
+      render();
+      toast(`已跳转并筛选主 C：${carryName || '所选角色'}。`);
+      return;
+    }
+    if (btn.dataset.jumpManePlayer) {
+      const playerName = btn.dataset.jumpManePlayer;
+      state.mode = 'mane';
+      state.manePage = 'scores';
+      state.maneSection = btn.dataset.jumpSection || 'new';
+      if (btn.dataset.jumpMap) state.maneMapId = btn.dataset.jumpMap;
+      state.maneDivision = btn.dataset.jumpDiv || 'zero';
+      state.maneRoleMode = 'carry';
+      state.maneCarry = '';
+      state.maneAfflatus = '';
+      state.maneQuery = playerName;
+      state.highlightRecordId = '';
+      render();
+      toast(`已跳转并筛选调查员：${playerName}。`);
+      return;
+    }
+    if (btn.dataset.jumpFbCarry) {
+      const carryKey = btn.dataset.jumpFbCarry;
+      const carryName = btn.dataset.jumpCarryName || '';
+      const matches = state.fbRecords.filter((r) =>
+        splitCarries(r.carry_name).some((c) => canonicalCharacterKey(c) === carryKey)
+      );
+      const best =
+        (state.fbCarryScope === 'period' && matches.find((r) => r.version_id === state.fbVersionId && r.stage_id === state.fbStageId && r.group_code === state.fbGroup)) ||
+        (state.fbCarryScope === 'period' && matches.find((r) => r.version_id === state.fbVersionId && r.stage_id === state.fbStageId)) ||
+        (state.fbCarryScope === 'period' && matches.find((r) => r.version_id === state.fbVersionId)) ||
+        matches.find((r) => r.stage_id === state.fbStageId && r.group_code === state.fbGroup) ||
+        matches[0];
+      state.mode = 'flashback';
+      state.fbPage = 'leaderboard';
+      if (best) {
+        state.fbVersionId = best.version_id || state.fbStages.find((s) => s.id === best.stage_id)?.version_id || state.fbVersionId;
+        state.fbStageId = best.stage_id;
+        state.fbGroup = best.group_code;
+      }
+      state.fbResonanceOnly = false;
+      state.fbRoleMode = 'carry';
+      state.fbCarry = carryKey;
+      state.fbAfflatus = '';
+      state.fbQuery = '';
+      state.highlightRecordId = '';
+      render();
+      toast(`已跳转并筛选主 C：${carryName || '所选角色'}。`);
+      return;
+    }
+    if (btn.dataset.jumpFbPlayer) {
+      const playerName = btn.dataset.jumpFbPlayer;
+      const targetKey = normKey(playerName);
+      const matches = state.fbRecords.filter((r) => normKey(r.display_name) === targetKey);
+      const best =
+        matches.find((r) => r.version_id === state.fbVersionId && r.stage_id === state.fbStageId && r.group_code === state.fbGroup) ||
+        matches.find((r) => r.version_id === state.fbVersionId) ||
+        matches[0];
+      state.mode = 'flashback';
+      state.fbPage = 'leaderboard';
+      if (best) {
+        state.fbVersionId = best.version_id || state.fbStages.find((s) => s.id === best.stage_id)?.version_id || state.fbVersionId;
+        state.fbStageId = best.stage_id;
+        state.fbGroup = best.group_code;
+      }
+      state.fbResonanceOnly = false;
+      state.fbRoleMode = 'carry';
+      state.fbCarry = '';
+      state.fbAfflatus = '';
+      state.fbQuery = playerName;
+      state.highlightRecordId = '';
+      render();
+      toast(`已跳转并筛选玩家：${playerName}。`);
       return;
     }
 
@@ -4508,11 +4808,29 @@ document.addEventListener('click', async (ev) => {
           ? `｜共鸣码：${(item.resonanceCodes || []).map((c) => c || '—').join(' / ')}`
           : '';
         const link = buildRecordDeepLink(item);
+        const rankPrefix = item.rank > 0 ? `#${item.rank}` : '每日新分';
+        const res10Text = item.mode === 'flashback' && item.resonanceTen ? '｜全0塑·共鸣10' : '';
         const text = item.mode === 'mane'
-          ? `【重返未来：1999 鬃毛邮报】#${item.rank} ${item.title}（${item.subtitle}）｜调查员：${item.player}｜主C：${item.carry}｜阵容：${teamText}${psyText}${resText}｜积分：${formatScore(item.score)}｜${link}`
-          : `【重返未来：1999 焦点闪回】#${item.rank} ${item.title}（${item.subtitle}）｜玩家：${item.player}｜主C：${item.carry}｜阵容：${teamText}${psyText}${resText}｜成绩：${item.rounds} 回合｜${link}`;
+          ? `【重返未来：1999 鬃毛邮报】${rankPrefix} ${item.title}（${item.subtitle}）｜调查员：${item.player}｜主C：${item.carry}｜阵容：${teamText}${psyText}${resText}｜积分：${formatScore(item.score)}｜${link}`
+          : `【重返未来：1999 焦点闪回】${rankPrefix} ${item.title}（${item.subtitle}${res10Text}）｜玩家：${item.player}｜主C：${item.carry}｜阵容：${teamText}${psyText}${resText}｜成绩：${item.rounds} 回合｜${link}`;
         await copyText(text);
         toast('纪录文字与直达链接已复制到剪贴板。');
+      }
+      return;
+    }
+    if (btn.dataset.copyAllRes) {
+      const item = posterIndex.get(btn.dataset.copyAllRes);
+      if (item) {
+        const slotNames = (item.canonicalTeam && item.canonicalTeam.length && !isLegacyShorthandTeam(item.team))
+          ? item.canonicalTeam
+          : (item.team || []);
+        const entries = (item.resonanceCodes || [])
+          .map((code, idx) => ({ code: String(code || '').trim(), name: slotNames[idx] || `${idx + 1}号位` }))
+          .filter((entry) => entry.code);
+        if (entries.length) {
+          await copyText(entries.map((entry) => `${entry.name}：${entry.code}`).join('\n'));
+          toast(`已复制全队 ${entries.length} 条共鸣码。`);
+        }
       }
       return;
     }

@@ -1,4 +1,4 @@
-import {canonicalCharacterKey, canonicalDisplayName} from './arcanists.js';
+import {canonicalCharacterKey, canonicalDisplayName} from './arcanists.js?v=20261125-opt1';
 
 const beijingDate = new Intl.DateTimeFormat('sv-SE', {timeZone: 'Asia/Shanghai', dateStyle: 'short'});
 const beijingDateTime = new Intl.DateTimeFormat('sv-SE', {
@@ -7,6 +7,13 @@ const beijingDateTime = new Intl.DateTimeFormat('sv-SE', {
 
 export function todayInBeijing() {
   return beijingDate.format(new Date());
+}
+
+export function shiftBeijingDay(day, deltaDays) {
+  const anchor = new Date(`${day}T12:00:00+08:00`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !Number.isFinite(anchor.getTime()) ||
+    beijingDate.format(anchor) !== day) throw new Error('请选择有效日期。');
+  return beijingDate.format(new Date(anchor.getTime() + deltaDays * 24 * 60 * 60 * 1000));
 }
 
 export function beijingTime(value) {

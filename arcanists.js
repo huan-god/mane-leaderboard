@@ -547,23 +547,23 @@ const WIKI_MAIN = 'https://res1999.huijiwiki.com/wiki/%E9%AC%83%E6%AF%9B%E9%82%A
 
 const BOSS_ASSETS = new Map([
   // 4.1 亚特兰蒂斯谋杀案 · 鉴藏者特版（本期新三图，薄弱点核对自灰机 Wiki 鬃毛邮报 4.1 及实机截图）
-  ['神话的遗闻',     { en: 'Eidolon of Avarice',                   weakness: ['star', 'plant'],      tags: ['群体伤害', '爆发伤害'], wiki: WIKI_41,   thumb: './assets/bosses/v4a1_boss1.png', hero: './assets/bosses/v4a1_boss1_wide.png', pos: '50% 22%' }],
-  ['思想的表观',     { en: 'Manifestation of Thought',             weakness: ['intellect', 'beast'], tags: ['护盾', '额外行动'],     wiki: WIKI_41,   thumb: './assets/bosses/v4a1_boss2.png', hero: './assets/bosses/v4a1_boss2_wide.png', pos: '50% 24%' }],
-  ['生命的饥馑',     { en: 'Coveter of Eternity',                  weakness: ['mineral', 'spirit'],  tags: ['仪式伤害', '即时治疗'], wiki: WIKI_41,   thumb: './assets/bosses/v4a1_boss3.png', hero: './assets/bosses/v4a1_boss3_wide.png', pos: '50% 18%' }],
-  ['生命的饥谨',     { en: 'Coveter of Eternity',                  weakness: ['mineral', 'spirit'],  tags: ['仪式伤害', '即时治疗'], wiki: WIKI_41,   thumb: './assets/bosses/v4a1_boss3.png', hero: './assets/bosses/v4a1_boss3_wide.png', pos: '50% 18%' }],
+  ['神话的遗闻',     { en: 'Eidolon of Avarice',                   weakness: ['star', 'plant'],      tags: ['群体伤害', '爆发伤害'], wiki: WIKI_41,   thumb: './assets/bosses/v4a1_boss1.webp', hero: './assets/bosses/v4a1_boss1_wide.webp', pos: '50% 22%' }],
+  ['思想的表观',     { en: 'Manifestation of Thought',             weakness: ['intellect', 'beast'], tags: ['护盾', '额外行动'],     wiki: WIKI_41,   thumb: './assets/bosses/v4a1_boss2.webp', hero: './assets/bosses/v4a1_boss2_wide.webp', pos: '50% 24%' }],
+  ['生命的饥馑',     { en: 'Coveter of Eternity',                  weakness: ['mineral', 'spirit'],  tags: ['仪式伤害', '即时治疗'], wiki: WIKI_41,   thumb: './assets/bosses/v4a1_boss3.webp', hero: './assets/bosses/v4a1_boss3_wide.webp', pos: '50% 18%' }],
+  ['生命的饥谨',     { en: 'Coveter of Eternity',                  weakness: ['mineral', 'spirit'],  tags: ['仪式伤害', '即时治疗'], wiki: WIKI_41,   thumb: './assets/bosses/v4a1_boss3.webp', hero: './assets/bosses/v4a1_boss3_wide.webp', pos: '50% 18%' }],
   // 目击者特版 · 往期复刻首领（12 图全覆盖，优势灵感均核对自灰机 Wiki 对应条目）
-  ['子弹的冬年',     { en: 'The Bullet-Torn Winter',               weakness: ['star', 'beast'],                     tags: ['群体伤害', '爆发伤害'], wiki: WIKI_MAIN, thumb: './assets/bosses/v4a0_boss1.png', hero: './assets/bosses/v4a0_boss1.png', pos: '50% 22%' }],
-  ['急性猩红症·Ⅱ型', { en: 'Insatiable Bloodsucker Type II',       weakness: ['beast', 'plant', 'star', 'mineral'], tags: ['自然灵感', '仪式解控'], wiki: WIKI_MAIN, thumb: './assets/bosses/v3a9_boss1.png', hero: './assets/bosses/v3a9_boss1.png', pos: '50% 24%' }],
-  ['太阳的宠臣',     { en: 'The Sun’s Thrall',                     weakness: ['star', 'mineral'],                   tags: ['治疗咒语', '主动攻击'], wiki: WIKI_MAIN, thumb: './assets/bosses/v3a8_boss1.png', hero: './assets/bosses/v3a8_boss1.png', pos: '50% 28%' }],
-  ['旧日的荣耀',     { en: 'Glory Days Manifest',                  weakness: ['mineral', 'spirit'],                 tags: ['多增益叠层', '爆发伤害'], wiki: WIKI_MAIN, thumb: './assets/bosses/v3a7_boss1.png', hero: './assets/bosses/v3a7_boss1.png', pos: '50% 22%' }],
-  ['自我同情者',     { en: 'The Self-Pitying Avenger',             weakness: ['star', 'mineral'],                   tags: ['现实创伤', '及时治疗'], wiki: WIKI_MAIN, thumb: './assets/bosses/sp02_boss1.png', hero: './assets/bosses/sp02_boss1.png', pos: '50% 25%' }],
-  ['超限的囚徒·Ⅱ型', { en: 'Captive of Transcendentality Type II', weakness: ['spirit', 'intellect'],               tags: ['术阵仪式', '单体爆发'], wiki: WIKI_MAIN, thumb: './assets/bosses/v3a6_boss1.png', hero: './assets/bosses/v3a6_boss1.png', pos: '50% 20%' }],
-  ['信仰的移位·Ⅱ型', { en: 'Distortion of Faith Type II',          weakness: ['intellect', 'beast'],                tags: ['术法输出', '增益解崩'], wiki: WIKI_MAIN, thumb: './assets/bosses/v3a5_boss1.png', hero: './assets/bosses/v3a5_boss1.png', pos: '50% 24%' }],
-  ['毁灭的履带',     { en: 'Caterpillar of Destruction',           weakness: ['plant', 'star'],                     tags: ['克制群攻', '破甲暴露'], wiki: WIKI_MAIN, thumb: './assets/bosses/v3a4_boss1.png', hero: './assets/bosses/v3a4_boss1.png', pos: '50% 35%' }],
-  ['急性猩红症',     { en: 'Insatiable Bloodsucker',               weakness: ['beast', 'spirit', 'intellect'],      tags: ['群体伤害', '仪式清debuff'], wiki: WIKI_MAIN, thumb: './assets/bosses/v3a3_boss1.png', hero: './assets/bosses/v3a3_boss1.png', pos: '50% 28%' }],
-  ['超限的囚徒',     { en: 'Captive of Transcendentality',         weakness: ['beast', 'intellect'],                tags: ['单体追击', '3回合仪式窗'], wiki: WIKI_MAIN, thumb: './assets/bosses/v3a2_boss2.png', hero: './assets/bosses/v3a2_boss2.png', pos: '50% 20%' }],
-  ['蜕化的残响',     { en: 'The Cocooned Lament',                  weakness: ['mineral', 'beast'],                  tags: ['精神创伤', '额外行动'], wiki: WIKI_MAIN, thumb: './assets/bosses/v3a2_boss1.png', hero: './assets/bosses/v3a2_boss1.png', pos: '50% 30%' }],
-  ['信仰的移位',     { en: 'Distortion of Faith',                  weakness: ['spirit', 'intellect'],               tags: ['群体伤害', '主动减益'], wiki: WIKI_MAIN, thumb: './assets/bosses/v3a2_boss3.png', hero: './assets/bosses/v3a2_boss3.png', pos: '50% 24%' }]
+  ['子弹的冬年',     { en: 'The Bullet-Torn Winter',               weakness: ['star', 'beast'],                     tags: ['群体伤害', '爆发伤害'], wiki: WIKI_MAIN, thumb: './assets/bosses/v4a0_boss1.webp', hero: './assets/bosses/v4a0_boss1.webp', pos: '50% 22%' }],
+  ['急性猩红症·Ⅱ型', { en: 'Insatiable Bloodsucker Type II',       weakness: ['beast', 'plant', 'star', 'mineral'], tags: ['自然灵感', '仪式解控'], wiki: WIKI_MAIN, thumb: './assets/bosses/v3a9_boss1.webp', hero: './assets/bosses/v3a9_boss1.webp', pos: '50% 24%' }],
+  ['太阳的宠臣',     { en: 'The Sun’s Thrall',                     weakness: ['star', 'mineral'],                   tags: ['治疗咒语', '主动攻击'], wiki: WIKI_MAIN, thumb: './assets/bosses/v3a8_boss1.webp', hero: './assets/bosses/v3a8_boss1.webp', pos: '50% 28%' }],
+  ['旧日的荣耀',     { en: 'Glory Days Manifest',                  weakness: ['mineral', 'spirit'],                 tags: ['多增益叠层', '爆发伤害'], wiki: WIKI_MAIN, thumb: './assets/bosses/v3a7_boss1.webp', hero: './assets/bosses/v3a7_boss1.webp', pos: '50% 22%' }],
+  ['自我同情者',     { en: 'The Self-Pitying Avenger',             weakness: ['star', 'mineral'],                   tags: ['现实创伤', '及时治疗'], wiki: WIKI_MAIN, thumb: './assets/bosses/sp02_boss1.webp', hero: './assets/bosses/sp02_boss1.webp', pos: '50% 25%' }],
+  ['超限的囚徒·Ⅱ型', { en: 'Captive of Transcendentality Type II', weakness: ['spirit', 'intellect'],               tags: ['术阵仪式', '单体爆发'], wiki: WIKI_MAIN, thumb: './assets/bosses/v3a6_boss1.webp', hero: './assets/bosses/v3a6_boss1.webp', pos: '50% 20%' }],
+  ['信仰的移位·Ⅱ型', { en: 'Distortion of Faith Type II',          weakness: ['intellect', 'beast'],                tags: ['术法输出', '增益解崩'], wiki: WIKI_MAIN, thumb: './assets/bosses/v3a5_boss1.webp', hero: './assets/bosses/v3a5_boss1.webp', pos: '50% 24%' }],
+  ['毁灭的履带',     { en: 'Caterpillar of Destruction',           weakness: ['plant', 'star'],                     tags: ['克制群攻', '破甲暴露'], wiki: WIKI_MAIN, thumb: './assets/bosses/v3a4_boss1.webp', hero: './assets/bosses/v3a4_boss1.webp', pos: '50% 35%' }],
+  ['急性猩红症',     { en: 'Insatiable Bloodsucker',               weakness: ['beast', 'spirit', 'intellect'],      tags: ['群体伤害', '仪式清debuff'], wiki: WIKI_MAIN, thumb: './assets/bosses/v3a3_boss1.webp', hero: './assets/bosses/v3a3_boss1.webp', pos: '50% 28%' }],
+  ['超限的囚徒',     { en: 'Captive of Transcendentality',         weakness: ['beast', 'intellect'],                tags: ['单体追击', '3回合仪式窗'], wiki: WIKI_MAIN, thumb: './assets/bosses/v3a2_boss2.webp', hero: './assets/bosses/v3a2_boss2.webp', pos: '50% 20%' }],
+  ['蜕化的残响',     { en: 'The Cocooned Lament',                  weakness: ['mineral', 'beast'],                  tags: ['精神创伤', '额外行动'], wiki: WIKI_MAIN, thumb: './assets/bosses/v3a2_boss1.webp', hero: './assets/bosses/v3a2_boss1.webp', pos: '50% 30%' }],
+  ['信仰的移位',     { en: 'Distortion of Faith',                  weakness: ['spirit', 'intellect'],               tags: ['群体伤害', '主动减益'], wiki: WIKI_MAIN, thumb: './assets/bosses/v3a2_boss3.webp', hero: './assets/bosses/v3a2_boss3.webp', pos: '50% 24%' }]
 ]);
 
 const ROMAN_NUMERALS = [
@@ -601,16 +601,16 @@ export function rarityOverlaySrc(star) {
   return `./assets/uttu/bg_pz00${s}.png`;
 }
 
-// 鬃毛邮报调查积分评级（严格对齐实机 4.1 鉴藏者特版评估档位与官方评级徽章 PNG）
+// 鬃毛邮报调查积分评级（严格对齐实机 4.1 鉴藏者特版评估档位与官方评级徽章 WebP）
 export function resolveManeGrade(score) {
   const n = typeof score === 'bigint' ? score : BigInt(score || 0);
-  if (n >= 100000000n) return { grade: 'SSS', tier: 'mythic', tag: '破亿', img: './assets/grades/sss_prism.png' };
-  if (n >= 1200000n)   return { grade: 'SSS', tier: 'sss',    tag: '',     img: './assets/grades/sss_prism.png' };
-  if (n >= 800000n)    return { grade: 'SS',  tier: 'ss',     tag: '',     img: './assets/grades/ss_v4.png' };
-  if (n >= 500000n)    return { grade: 'S',   tier: 's',      tag: '',     img: './assets/grades/s_v4.png' };
-  if (n >= 300000n)    return { grade: 'A',   tier: 'a',      tag: '',     img: './assets/grades/a4.png' };
-  if (n >= 150000n)    return { grade: 'B',   tier: 'b',      tag: '',     img: './assets/grades/b4.png' };
-  if (n >= 50000n)     return { grade: 'C',   tier: 'c',      tag: '',     img: './assets/grades/c4.png' };
+  if (n >= 100000000n) return { grade: 'SSS', tier: 'mythic', tag: '破亿', img: './assets/grades/sss_prism.webp' };
+  if (n >= 1200000n)   return { grade: 'SSS', tier: 'sss',    tag: '',     img: './assets/grades/sss_prism.webp' };
+  if (n >= 800000n)    return { grade: 'SS',  tier: 'ss',     tag: '',     img: './assets/grades/ss_v4.webp' };
+  if (n >= 500000n)    return { grade: 'S',   tier: 's',      tag: '',     img: './assets/grades/s_v4.webp' };
+  if (n >= 300000n)    return { grade: 'A',   tier: 'a',      tag: '',     img: './assets/grades/a4.webp' };
+  if (n >= 150000n)    return { grade: 'B',   tier: 'b',      tag: '',     img: './assets/grades/b4.webp' };
+  if (n >= 50000n)     return { grade: 'C',   tier: 'c',      tag: '',     img: './assets/grades/c4.webp' };
   return { grade: '—', tier: 'none', tag: '', img: '' };
 }
 

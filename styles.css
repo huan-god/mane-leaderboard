@@ -47,9 +47,9 @@
   --accent-glow: rgba(223, 105, 49, 0.28);
   --accent-text: #df6931;
 
-  --font-serif: 'Noto Serif SC', 'Songti SC', 'STSong', 'Source Han Serif SC', Georgia, serif;
-  --font-display: 'Cinzel', 'Noto Serif SC', Georgia, serif;
-  --font-italic: 'Cormorant Garamond', Georgia, serif;
+  --font-serif: 'Noto Serif SC', 'Source Han Serif SC', 'Songti SC', 'STSong', 'SimSun', Georgia, serif;
+  --font-display: 'Cinzel', 'Times New Roman', 'Noto Serif SC', 'Songti SC', Georgia, serif;
+  --font-italic: 'Cormorant Garamond', 'Palatino Linotype', 'Book Antiqua', Georgia, serif;
   --font-sans: system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
 
   --radius-xs: 2px;
@@ -2941,7 +2941,27 @@ body[data-mode="flashback"] .modal-box {
 
 .poster-kicker { font-family: var(--font-display); font-size: 10px; letter-spacing: 0.2em; color: #8c3426; }
 .poster-head h3 { margin: 4px 0 2px; font-family: var(--font-serif); font-size: 21px; color: #1a120d; }
+.poster-sub-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
 .poster-sub { font-size: 12px; color: #5b4739; }
+.poster-res10-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 2px;
+  border: 1px solid #8d6423;
+  background: #3d2c1b;
+  color: #f8db9e;
+  font-family: var(--font-serif);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.4;
+  white-space: nowrap;
+}
 .poster-rank-box { text-align: right; flex-shrink: 0; }
 .poster-rank-num { font-family: var(--font-display); font-size: 30px; font-weight: 700; line-height: 1; color: #b93a2b; }
 .poster-rank-label { font-family: var(--font-display); font-size: 10px; letter-spacing: 0.16em; color: #6b5241; }
@@ -3598,12 +3618,38 @@ body[data-mode="flashback"] .psy-chip.active {
   border-top: 1px dashed rgba(90, 56, 36, 0.34);
 }
 
+.poster-builds-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 10px;
+  margin-bottom: 8px;
+}
+
 .poster-builds-heading {
   font-family: var(--font-display);
   font-size: 10px;
   letter-spacing: 0.14em;
   color: #7c3825;
-  margin-bottom: 8px;
+}
+
+.poster-res-copy-all {
+  padding: 3px 10px;
+  border: 1px solid #8c3426;
+  border-radius: 2px;
+  background: #8c3426;
+  color: #fff6ec;
+  font-family: var(--font-serif);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: filter 0.14s ease;
+}
+
+.poster-res-copy-all:hover {
+  filter: brightness(1.14);
 }
 
 .poster-builds-grid {
@@ -3730,6 +3776,106 @@ body[data-mode="flashback"] .psy-chip.active {
   border-top: 1px dashed rgba(90, 56, 36, 0.25);
   font-size: 11px;
   color: #735a47;
+}
+
+/* ==================== 每日新分筛选条 & 姓名直达跳转按钮 ==================== */
+.daily-filter-grid {
+  display: grid;
+  grid-template-columns: minmax(250px, 1.35fr) repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 16px 20px 0;
+}
+
+.daily-date-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.daily-quick-btn {
+  padding: 8px 11px;
+  border: 1px solid var(--line-hair);
+  border-radius: var(--radius-xs);
+  background: rgba(12, 10, 9, 0.54);
+  color: var(--linen);
+  font-family: var(--font-serif);
+  font-size: 12.5px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: all 0.14s ease;
+}
+
+.daily-quick-btn:hover {
+  border-color: var(--brass);
+  color: var(--parchment);
+}
+
+.daily-quick-btn.active {
+  border-color: var(--accent-text);
+  background: rgba(168, 51, 40, 0.24);
+  color: #fff5e9;
+  font-weight: 600;
+}
+
+.daily-date-controls input[type="date"] {
+  min-width: 0;
+  flex: 1 1 auto;
+  color-scheme: dark;
+}
+
+.cell-daily-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.daily-actions-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.entity-jump-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px 2px 0;
+  margin: -2px 0;
+  border: 0;
+  border-bottom: 1px dashed transparent;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  max-width: 100%;
+  transition: color 0.14s ease, border-color 0.14s ease;
+}
+
+.entity-jump-btn:hover {
+  color: var(--brass);
+  border-bottom-color: rgba(217, 176, 134, 0.55);
+}
+
+.entity-jump-btn:focus-visible {
+  outline: 2px solid var(--accent-text);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.entity-jump-arrow {
+  font-size: 11px;
+  color: var(--ink-muted);
+  opacity: 0.72;
+  flex-shrink: 0;
+  transition: transform 0.14s ease, color 0.14s ease, opacity 0.14s ease;
+}
+
+.entity-jump-btn:hover .entity-jump-arrow {
+  color: var(--copper-bright);
+  opacity: 1;
+  transform: translate(1px, -1px);
 }
 
 /* ==================== 页脚 & 轻提示 ==================== */
@@ -3962,7 +4108,7 @@ body[data-mode="flashback"] .psy-chip.active {
     border-top: 1px dashed var(--line-hair);
   }
 
-  .two-cards, .form-grid, .mech-passives-grid { grid-template-columns: minmax(0, 1fr); }
+  .two-cards, .form-grid, .daily-filter-grid, .mech-passives-grid { grid-template-columns: minmax(0, 1fr); }
   .mech-threshold-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .boss-mech-drawer { padding: 12px 14px; }
   .modal-box { padding: 18px; }
@@ -4429,6 +4575,25 @@ body[data-mode="flashback"] .psy-chip.active {
     font-size: 12px;
     line-height: 1.5;
     color: var(--ink-body);
+  }
+  .table-mane-daily .cell-daily-actions {
+    grid-column: 1 / -1;
+    grid-row: 4;
+    padding-top: 4px;
+    text-align: right;
+  }
+  .table-mane-daily .daily-actions-wrap {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 10px;
+  }
+  .daily-filter-grid {
+    padding: 12px 12px 0;
+    gap: 8px;
+  }
+  .daily-date-controls input[type="date"] {
+    font-size: 16px;
   }
 
   /* 6c. 焦点闪回 · 主 C 排行榜 & 玩家荣誉殿堂 */
