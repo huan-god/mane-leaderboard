@@ -403,7 +403,8 @@
       fieldScore: "Investigation Score",
       fieldRounds: "Clear Rounds (0–6)",
       fieldPlayerName: "Timekeeper Name",
-      fieldRelatedUrl: "Video / Guide URL (optional)",
+      fieldRelatedUrl: "Bilibili / YouTube Video Link (optional)",
+      fieldRelatedUrlPlaceholder: "https://www.youtube.com/... or https://www.bilibili.com/...",
       fieldContact: "Contact / Discord / UID (optional)",
       fieldProof: "Result Screenshot (PNG/JPG/WebP, ≤ 5 MB · larger images auto-compressed)",
       fieldProofHint: "Used strictly for moderator verification; never published publicly.",
@@ -412,10 +413,10 @@
       globalFbNoticeTag: "GLOBAL SERVER NOTICE",
       globalFbBoardNotice: "Focused Flashback follows the CN server's active cycle (v4.1) and enemy tuning changes every patch, so Global server clears cannot currently be verified or accepted here. Browse CN clears freely for future reference — Global players can submit scores in Mane's Bulletin!",
       globalFbBoardCta: "Go to Mane's Bulletin →",
-      globalFbSubmitNotice: "CN Server Only (Focused Flashback): Global is ~2–3 patches behind CN and Focused Flashback stages & enemy tuning change each cycle, so moderators can only verify CN server clears for this mode. Global players are welcome to submit Mane's Bulletin scores instead.",
+      globalFbSubmitNotice: "CN Server Only (Focused Flashback): Global is 2 patches behind CN (Global v3.9 vs. CN v4.1) and Focused Flashback stages & enemy tuning change each cycle, so moderators can only verify CN server clears for this mode. Global players are welcome to submit Mane's Bulletin scores instead.",
       globalFbSubmitCta: "Submit Mane's Bulletin Instead →",
       globalManeNoticeTag: "GLOBAL SERVER WELCOME",
-      globalManeSubmitNotice: "Global server (~2–3 patches behind CN) players are welcome to submit Mane's Bulletin scores for any matching boss already live on Global! Check Anomaly Gallery for earlier bosses; Collector's Edition lists the latest CN v4.1 bosses.",
+      globalManeSubmitNotice: "Global server (2 patches behind CN, currently v3.9) players are welcome to submit Mane's Bulletin scores for any matching boss already live on Global! Check Anomaly Gallery for earlier bosses; Collector's Edition lists the latest CN v4.1 bosses.",
       btnSubmitNow: "Submit Record",
       btnSubmitting: "Submitting…",
       btnSaveChanges: "Save Changes",
@@ -906,7 +907,8 @@
       fieldScore: "调查积分",
       fieldRounds: "通关回合数（0–6）",
       fieldPlayerName: "调查员昵称",
-      fieldRelatedUrl: "攻略 / 视频链接（选填）",
+      fieldRelatedUrl: "B站 / YouTube 视频链接（选填）",
+      fieldRelatedUrlPlaceholder: "https://www.bilibili.com/... 或 https://www.youtube.com/...",
       fieldContact: "联系方式（选填）",
       fieldProof: "结算截图（PNG/JPG/WebP，≤ 5 MB · 超大图片自动压缩）",
       fieldProofHint: "仅本人与审核管理员可见，不对外公开。",
@@ -49773,7 +49775,7 @@
       <div class="field"><label for="mScore">${esc(t("fieldScore", {}, lang))} *</label><input id="mScore" name="score" required inputmode="numeric" placeholder="${esc(L("e.g. 30635308", "例如 30635308", lang))}" value="${esc(record.score ?? "")}" /></div>
     </div>
     ${renderTeamBuilderFieldHtml(lang)}
-    <div class="field"><label for="mLink">${esc(t("fieldRelatedUrl", {}, lang))}</label><input id="mLink" name="related_url" type="url" maxlength="2048" placeholder="https://" value="${esc(record.related_url || "")}" /></div>`;
+    <div class="field"><label for="mLink">${esc(t("fieldRelatedUrl", {}, lang))}</label><input id="mLink" name="related_url" type="url" maxlength="2048" placeholder="${esc(t("fieldRelatedUrlPlaceholder", {}, lang))}" value="${esc(record.related_url || "")}" /></div>`;
   }
   function readManeFields(fd, { forEdit = false } = {}) {
     const lang = getLang();
@@ -50277,7 +50279,7 @@
       ${renderTeamBuilderFieldHtml(lang)}
       <div class="field">
         <label for="fbFormLink">${esc(t("fieldRelatedUrl", {}, lang))}</label>
-        <input id="fbFormLink" name="relatedUrl" type="url" maxlength="2048" placeholder="https://" value="${esc(draft?.relatedUrl || "")}" />
+        <input id="fbFormLink" name="relatedUrl" type="url" maxlength="2048" placeholder="${esc(t("fieldRelatedUrlPlaceholder", {}, lang))}" value="${esc(draft?.relatedUrl || "")}" />
       </div>
       ${contactFieldHtml(lang)}
       <p class="submit-portray-note">✦ ${esc(t("submitPortrayLimitNote", {}, lang))}</p>
@@ -51767,7 +51769,7 @@
           </div>
           ${resonanceChoice(rec.group_code, rec.resonance_ten, lang)}
           ${renderTeamBuilderFieldHtml(lang)}
-          <div class="field"><label for="feUrl">${esc(t("fieldRelatedUrl", {}, lang))}</label><input id="feUrl" name="url" type="url" maxlength="2048" value="${esc(rec.related_url || "")}" /></div>
+          <div class="field"><label for="feUrl">${esc(t("fieldRelatedUrl", {}, lang))}</label><input id="feUrl" name="url" type="url" maxlength="2048" placeholder="${esc(t("fieldRelatedUrlPlaceholder", {}, lang))}" value="${esc(rec.related_url || "")}" /></div>
           <div class="form-actions">
             <button type="button" class="outline-btn" data-fb-admin="${esc(tab)}">${esc(t("btnCancel", {}, lang))}</button>
             <button type="submit" class="copper-btn">${esc(t("btnSaveChanges", {}, lang))}</button>

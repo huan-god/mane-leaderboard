@@ -5745,7 +5745,7 @@ function maneScoreFieldsHtml(record, maps, lang = getLang()) {
       <div class="field"><label for="mScore">${esc(t('fieldScore', {}, lang))} *</label><input id="mScore" name="score" required inputmode="numeric" placeholder="${esc(L('e.g. 30635308', '例如 30635308', lang))}" value="${esc(record.score ?? '')}" /></div>
     </div>
     ${renderTeamBuilderFieldHtml(lang)}
-    <div class="field"><label for="mLink">${esc(t('fieldRelatedUrl', {}, lang))}</label><input id="mLink" name="related_url" type="url" maxlength="2048" placeholder="https://" value="${esc(record.related_url || '')}" /></div>`;
+    <div class="field"><label for="mLink">${esc(t('fieldRelatedUrl', {}, lang))}</label><input id="mLink" name="related_url" type="url" maxlength="2048" placeholder="${esc(t('fieldRelatedUrlPlaceholder', {}, lang))}" value="${esc(record.related_url || '')}" /></div>`;
 }
 
 function readManeFields(fd, { forEdit = false } = {}) {
@@ -6291,7 +6291,7 @@ function openFbSubmitModal() {
       ${renderTeamBuilderFieldHtml(lang)}
       <div class="field">
         <label for="fbFormLink">${esc(t('fieldRelatedUrl', {}, lang))}</label>
-        <input id="fbFormLink" name="relatedUrl" type="url" maxlength="2048" placeholder="https://" value="${esc(draft?.relatedUrl || '')}" />
+        <input id="fbFormLink" name="relatedUrl" type="url" maxlength="2048" placeholder="${esc(t('fieldRelatedUrlPlaceholder', {}, lang))}" value="${esc(draft?.relatedUrl || '')}" />
       </div>
       ${contactFieldHtml(lang)}
       <p class="submit-portray-note">✦ ${esc(t('submitPortrayLimitNote', {}, lang))}</p>
@@ -7863,7 +7863,7 @@ document.addEventListener('click', async (ev) => {
           </div>
           ${resonanceChoice(rec.group_code, rec.resonance_ten, lang)}
           ${renderTeamBuilderFieldHtml(lang)}
-          <div class="field"><label for="feUrl">${esc(t('fieldRelatedUrl', {}, lang))}</label><input id="feUrl" name="url" type="url" maxlength="2048" value="${esc(rec.related_url || '')}" /></div>
+          <div class="field"><label for="feUrl">${esc(t('fieldRelatedUrl', {}, lang))}</label><input id="feUrl" name="url" type="url" maxlength="2048" placeholder="${esc(t('fieldRelatedUrlPlaceholder', {}, lang))}" value="${esc(rec.related_url || '')}" /></div>
           <div class="form-actions">
             <button type="button" class="outline-btn" data-fb-admin="${esc(tab)}">${esc(t('btnCancel', {}, lang))}</button>
             <button type="submit" class="copper-btn">${esc(t('btnSaveChanges', {}, lang))}</button>
