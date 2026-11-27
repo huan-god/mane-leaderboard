@@ -8278,7 +8278,6 @@ async function bootstrap() {
   const useLive = !isOfflineSandboxMode() && Boolean(cfg?.supabaseUrl && cfg?.supabaseAnonKey);
   if (useLive) {
     state.dataSource = 'live';
-    state.syncingLive = true;
   }
   render();
 
