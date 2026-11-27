@@ -3281,15 +3281,10 @@ function renderRowIntelColumnHtml({
     }
   }
 
-  // 3. Optional Watch Guide Link
-  let guideHref = '';
-  try { guideHref = parseHttpUrl(record.related_url); } catch { guideHref = ''; }
-
   return `
     <div class="row-intel-col">
       ${(archChipsHtml || resBadge) ? `<div class="row-archetype-strip">${archChipsHtml}${resBadge}</div>` : ''}
       ${peakMeterHtml}
-      ${guideHref ? `<div class="row-quick-actions"><a class="row-quick-btn" href="${esc(guideHref)}" target="_blank" rel="noopener noreferrer ugc">${esc(t('rowWatchGuide', {}, lang))}</a></div>` : ''}
     </div>`;
 }
 
@@ -4122,12 +4117,14 @@ async function fillManeDailyResults(host) {
       const colScore = t('scoreLabel', {}, lang);
       const colAction = L('Actions', '操作', lang);
 
+      const carrySet = new Set(splitCarries(row.carry).map(canonicalCharacterKey));
       const miniSlots = parseLineupSlots(row.team, row.carry);
       const miniLineupHtml = miniSlots.some((s) => s.type === 'char' && s.char?.portrait)
         ? `<div class="daily-mini-lineup" style="margin-top:4px">${miniSlots.slice(0, 4).map((s) => {
             if (s.type === 'char' && s.char?.portrait) {
               const cName = displayCharacterName(s.char.name, lang);
-              return `<span class="daily-mini-card" data-open-char="${esc(s.char.name)}" role="button" tabindex="0" style="cursor:pointer" title="${esc(cName)}"><img src="${esc(s.char.portrait)}" alt="${esc(cName)}" loading="lazy" decoding="async" /></span>`;
+              const isCarry = carrySet.has(s.char ? `char:${s.char.id}` : canonicalCharacterKey(s.raw));
+              return `<span class="daily-mini-card${isCarry ? ' is-carry' : ''}" data-open-char="${esc(s.char.name)}" role="button" tabindex="0" style="cursor:pointer" title="${esc(cName)}"><img src="${esc(s.char.portrait)}" alt="${esc(cName)}" loading="lazy" decoding="async" /></span>`;
             }
             return '';
           }).join('')}</div>`
@@ -4138,7 +4135,7 @@ async function fillManeDailyResults(host) {
         <td class="cell-daily-map" data-label="${esc(colBoss)}">${esc(bossTitle)}</td>
         <td class="cell-daily-div" data-label="${esc(colDiv)}">${esc(localizeDivisionShort(row.division, lang))}</td>
         <td class="cell-daily-player" data-label="${esc(colPlayer)}"><span class="player-name is-clickable is-player-name" data-open-player="${esc(row.display_name)}" role="button" tabindex="0">${esc(row.display_name)}</span> ${localRecordBadgeHtml(row, lang)}</td>
-        <td class="cell-daily-lineup" data-label="${esc(colLineup)}"><strong>${esc(carryDisplay)}</strong><br>${esc(teamDisplay.join(teamJoiner))} ${safeLinkHtml(row.related_url, t('relatedLink', {}, lang))}${miniLineupHtml}</td>
+        <td class="cell-daily-lineup" data-label="${esc(colLineup)}"><div class="carry-line daily-carry-line"><span class="carry-label">${esc(t('mainDpsLabel', {}, lang))}</span><strong>${esc(carryDisplay)}</strong></div><div class="daily-team-text">${esc(teamDisplay.join(teamJoiner))} ${safeLinkHtml(row.related_url, t('relatedLink', {}, lang))}</div>${miniLineupHtml}</td>
         <td class="num-col cell-daily-score" data-label="${esc(colScore)}"><span class="score-value">${formatScore(row.score, lang)}</span></td>
         <td class="cell-daily-actions" data-label="${esc(colAction)}"><span class="daily-actions-wrap"><button type="button" class="card-trigger daily-action-btn" data-poster="${esc(pid)}">${esc(t('viewCardBtn', {}, lang))}</button>${liveRow ? `<button type="button" class="text-link-btn" data-jump-mane-record="${esc(row.id)}" data-jump-section="${esc(section)}" data-jump-map="${esc(row.map_id)}" data-jump-div="${esc(row.division)}">${esc(t('dailyJumpBtn', {}, lang))}</button>` : ''}</span></td>
       </tr>`;
