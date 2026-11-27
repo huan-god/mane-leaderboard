@@ -4,13 +4,46 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#161210" />
-  <meta name="description" content="重返未来：1999 玩家社区榜单——融合「鬃毛邮报」调查积分榜与「焦点闪回」最短回合纪录，内置中英双语切换与离线档案库。" />
+  <meta name="description" content="重返未来：1999 玩家社区榜单——融合「鬃毛邮报」调查积分榜与「焦点闪回」最短回合纪录，内置中英双语切换与实时档案库。" />
   <title>重返未来：1999 · 鬃毛邮报 &amp; 焦点闪回 玩家榜单</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%231b1411' stroke='%23df6931' stroke-width='3'/%3E%3Ctext x='32' y='43' text-anchor='middle' font-size='32' font-family='serif' fill='%23ede4d7'%3E%E9%82%AE%3C/text%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="./styles.css?v=20261127-v8" />
-  <link rel="stylesheet" href="./submission-progress.css?v=20261127-v8" />
-  <script src="./config.js?v=20261127-v8"></script>
-  <script defer src="./app.bundle.js?v=20261127-v8"></script>
+  <link rel="stylesheet" href="./styles.bundle.css?v=20261127-mobile-perf1" />
+  <script src="./config.js?v=20261127-mobile-perf1"></script>
+  <script>
+    (function () {
+      var ASSET_VER = '20261127-mobile-perf1';
+      function norm(v) {
+        v = String(v || '').trim().toLowerCase();
+        if (!v) return '';
+        if (v === 'zh' || v.indexOf('zh-') === 0 || v === 'cn' || v === 'zh_cn') return 'zh';
+        if (v === 'en' || v.indexOf('en-') === 0) return 'en';
+        return '';
+      }
+      var lang = '';
+      try { lang = norm(new URLSearchParams(location.search || '').get('lang')); } catch (e) {}
+      if (!lang) {
+        try { lang = norm(localStorage.getItem('r1999-lang')); } catch (e) {}
+      }
+      if (!lang) {
+        var domDef = String(document.documentElement.getAttribute('data-default-lang') || '').trim().toLowerCase();
+        if (domDef && domDef !== 'auto') lang = norm(domDef);
+      }
+      if (!lang) {
+        var cfgDef = String((window.LEADERBOARD_CONFIG && window.LEADERBOARD_CONFIG.defaultLang) || '').trim().toLowerCase();
+        if (cfgDef && cfgDef !== 'auto') lang = norm(cfgDef);
+      }
+      if (!lang) lang = 'zh';
+      document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+      window.__R1999_BOOT_LANG__ = lang;
+      window.__R1999_ASSET_VER__ = ASSET_VER;
+      if (typeof fetch === 'function') {
+        window.__R1999_LANG_PROMISE__ = fetch('./data/lang-' + lang + '.json?v=' + encodeURIComponent(ASSET_VER), { cache: 'default' })
+          .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+          .catch(function () { return null; });
+      }
+    })();
+  </script>
+  <script defer src="./app.bundle.js?v=20261127-mobile-perf1"></script>
 </head>
 <body data-mode="mane" data-lang="zh">
   <div class="arch-backdrop" aria-hidden="true"></div>
@@ -71,7 +104,7 @@
           <span class="subnav-meta" id="subnavMeta">MANE’S BULLETIN · HIGH SCORE</span>
           <span id="connectionBadge" class="status-pill is-offline-archive" aria-live="polite">
             <span class="status-dot"></span>
-            <span id="connectionText">离线档案 · v4.1</span>
+            <span id="connectionText">同步档案库…</span>
           </span>
           <button type="button" id="syncLiveBtn" class="sync-live-btn" data-action="sync-live">同步在线库 ↻</button>
         </div>
@@ -90,7 +123,9 @@
 
       <div id="globalNotice" class="global-notice" role="status" hidden></div>
 
-      <div id="workspace" class="workspace"></div>
+      <div id="workspace" class="workspace">
+        <div class="boot-skeleton"><span>正在同步最新榜单档案…</span></div>
+      </div>
     </div>
   </main>
 
@@ -102,8 +137,8 @@
           <span>鬃毛邮报调查积分榜 × 焦点闪回最短回合榜</span>
         </div>
         <p class="footer-credits">
-          社区榜单站长：幻化凌风（<a href="https://space.bilibili.com/266889606" target="_blank" rel="noopener noreferrer">哔哩哔哩主页 ↗</a>）·
-          管理员：寻屿、莳雨枫椛、偶尔出现的神秘猫猫头、椋-喵
+          社区榜单站长：<span class="is-player-name">幻化凌风</span>（<a href="https://space.bilibili.com/266889606" target="_blank" rel="noopener noreferrer">哔哩哔哩主页 ↗</a>）·
+          管理员：<span class="is-player-name">寻屿</span>、<span class="is-player-name">莳雨枫椛</span>、<span class="is-player-name">偶尔出现的神秘猫猫头</span>、<span class="is-player-name">椋-喵</span>
         </p>
       </div>
       <div class="footer-col footer-links">

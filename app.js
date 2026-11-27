@@ -101,9 +101,54 @@ import {
   shiftBeijingDay,
   todayInBeijing
 } from './mane-reports.js';
-import { OFFLINE_SNAPSHOT } from './data/offline-snapshot.js';
-import { recognizeManeScreenshot } from './mane-screenshot.js';
-import { recognizeFlashbackScreenshot } from './flashback-screenshot.js';
+import { ensureLangPack } from './lang-pack.js';
+
+let cachedOfflineSnapshot = null;
+let offlineSnapshotPromise = null;
+async function ensureOfflineSnapshot() {
+  if (cachedOfflineSnapshot) return cachedOfflineSnapshot;
+  if (!offlineSnapshotPromise) {
+    const ver = String(globalThis.LEADERBOARD_CONFIG?.assetVersion || globalThis.__R1999_ASSET_VER__ || '').trim();
+    const url = ver ? `./data/offline-snapshot.json?v=${encodeURIComponent(ver)}` : './data/offline-snapshot.json';
+    offlineSnapshotPromise = fetch(url, { cache: 'default' })
+      .then((res) => (res.ok ? res.json() : {}))
+      .then((data) => {
+        cachedOfflineSnapshot = data && typeof data === 'object' ? data : {};
+        return cachedOfflineSnapshot;
+      })
+      .catch((err) => {
+        console.warn('Offline snapshot load failed:', err);
+        cachedOfflineSnapshot = {};
+        return cachedOfflineSnapshot;
+      });
+  }
+  return offlineSnapshotPromise;
+}
+
+let ocrModulePromise = null;
+function loadOcrModule() {
+  if (globalThis.__R1999_OCR__) return Promise.resolve(globalThis.__R1999_OCR__);
+  if (ocrModulePromise) return ocrModulePromise;
+  ocrModulePromise = new Promise((resolve, reject) => {
+    const ver = String(globalThis.LEADERBOARD_CONFIG?.assetVersion || globalThis.__R1999_ASSET_VER__ || '').trim();
+    const s = document.createElement('script');
+    s.src = ver ? `./ocr.bundle.js?v=${encodeURIComponent(ver)}` : './ocr.bundle.js';
+    s.async = true;
+    s.onload = () => {
+      if (globalThis.__R1999_OCR__) resolve(globalThis.__R1999_OCR__);
+      else {
+        ocrModulePromise = null;
+        reject(new Error('OCR module did not initialize'));
+      }
+    };
+    s.onerror = () => {
+      ocrModulePromise = null;
+      reject(new Error('Failed to load OCR module'));
+    };
+    document.head.appendChild(s);
+  });
+  return ocrModulePromise;
+}
 
 const $ = (sel) => document.querySelector(sel);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (ch) =>
@@ -279,7 +324,7 @@ const state = {
   maneMechOpen: false,
   fbMechOpen: false,
   mobileFilterOpen: false,
-  intelCollapsed: false,
+  intelCollapsed: typeof window !== 'undefined' && window.innerWidth <= 680,
   maneSelectedAppraisal: -1,
   psyAmpLevel: 5,
   activePsyDossierId: '',
@@ -555,7 +600,7 @@ function mergeManeTotalsWithLocal(baseTotals, localManeRows, mapById) {
 }
 
 function hydrateFromOfflineSnapshot() {
-  const snap = OFFLINE_SNAPSHOT || {};
+  const snap = cachedOfflineSnapshot || {};
   const localStore = loadOfflineSubmissions();
   const localMane = localStore.mane.map((r) => ({ ...r, isLocal: true }));
   const localFb = localStore.flashback.map((r) => ({ ...r, isLocal: true }));
@@ -692,8 +737,8 @@ function renderPsychubeThumbHtml(rawPsy, sizeClass = '', lang = getLang()) {
   const pStat = displayPsychubeStat(psy, lang);
   return `
     <span class="psy-thumb ${sizeClass}" title="${esc(pName)} (${psy.star}★ · ${esc(pStat)})">
-      <img class="psy-thumb-bg" src="${esc(psychubeFrameSrc(psy.star))}" alt="" aria-hidden="true" loading="eager" />
-      <img class="psy-thumb-icon" src="${esc(psychubeIconSrc(psy.id))}" alt="${esc(pName)}" loading="eager" />
+      <img class="psy-thumb-bg" src="${esc(psychubeFrameSrc(psy.star))}" alt="" aria-hidden="true" loading="lazy" decoding="async" />
+      <img class="psy-thumb-icon" src="${esc(psychubeIconSrc(psy.id))}" alt="${esc(pName)}" loading="lazy" decoding="async" />
     </span>`;
 }
 
@@ -704,11 +749,11 @@ function renderCharPickerThumbHtml(char, lang = getLang()) {
   const affDisplay = localizeAfflatus(affKey, lang);
   return `
     <span class="char-picker-card-art">
-      <img class="slot-card-bg" src="./assets/uttu/bg_kapaidi.png" alt="" aria-hidden="true" loading="eager" />
-      ${char.portrait ? `<img class="slot-portrait" src="${esc(char.portrait)}" alt="${esc(charDisplay)}" loading="eager" />` : ''}
-      <img class="slot-rarity-layer" src="${esc(rarityOverlaySrc(char.star || 6))}" alt="" aria-hidden="true" loading="eager" />
+      <img class="slot-card-bg" src="./assets/uttu/bg_kapaidi.png" alt="" aria-hidden="true" loading="lazy" decoding="async" />
+      ${char.portrait ? `<img class="slot-portrait" src="${esc(char.portrait)}" alt="${esc(charDisplay)}" loading="lazy" decoding="async" />` : ''}
+      <img class="slot-rarity-layer" src="${esc(rarityOverlaySrc(char.star || 6))}" alt="" aria-hidden="true" loading="lazy" decoding="async" />
       <div class="slot-vignette" aria-hidden="true"></div>
-      ${aff.icon ? `<img class="slot-aff-img" src="${esc(aff.icon)}" alt="${esc(affDisplay)}" loading="eager" />` : ''}
+      ${aff.icon ? `<img class="slot-aff-img" src="${esc(aff.icon)}" alt="${esc(affDisplay)}" loading="lazy" decoding="async" />` : ''}
     </span>`;
 }
 
@@ -1713,7 +1758,10 @@ async function syncLiveArchive({ silent = false } = {}) {
     }
   } catch (err) {
     console.warn('Live sync failed:', err);
-    if (!state.maneMaps.length) hydrateFromOfflineSnapshot();
+    if (!state.maneMaps.length) {
+      await ensureOfflineSnapshot();
+      hydrateFromOfflineSnapshot();
+    }
     if (isOfflineSandboxMode()) {
       state.dataSource = 'offline';
       state.connected = true;
@@ -1763,6 +1811,7 @@ async function loadBoardBundle(board) {
 
 async function loadAllData({ keepOfflineOnFail = false } = {}) {
   if (isOfflineSandboxMode() && state.dataSource === 'offline' && !sb) {
+    await ensureOfflineSnapshot();
     hydrateFromOfflineSnapshot();
     render();
     return;
@@ -1795,7 +1844,10 @@ async function loadAllData({ keepOfflineOnFail = false } = {}) {
   } catch (err) {
     coveredBoards.forEach((board) => { reviewedBoards.add(board); });
     console.error(err);
-    if (!state.maneMaps.length) hydrateFromOfflineSnapshot();
+    if (!state.maneMaps.length) {
+      await ensureOfflineSnapshot();
+      hydrateFromOfflineSnapshot();
+    }
     if (isOfflineSandboxMode() && keepOfflineOnFail) {
       state.dataSource = 'offline';
       state.connected = true;
@@ -1973,7 +2025,7 @@ function renderSidebarMetaWidget(records, getCarryStr, activeCarryKey, mode, lan
             <button type="button" class="meta-carry-row ${active ? 'active' : ''}" data-meta-carry="${esc(key)}" data-meta-mode="${esc(mode)}" title="${esc(info.label)} · ${esc(formatEntries(info.count, lang))}">
               <span class="meta-carry-avatar">
                 ${info.portrait
-                  ? `<img src="${esc(info.portrait)}" alt="${esc(info.label)}" loading="eager" decoding="async" />`
+                  ? `<img src="${esc(info.portrait)}" alt="${esc(info.label)}" loading="lazy" decoding="async" />`
                   : `<span class="char-slot-mono">${esc(characterMonogram(info.label))}</span>`}
               </span>
               <span class="meta-carry-info">
@@ -2021,8 +2073,8 @@ function renderSlotPsychubeDockHtml(rawPsy, lang = getLang()) {
   return `
     <div class="slot-psy-dock is-clickable" ${openAttr} aria-label="${esc(pName)}">
       <span class="slot-psy-frame">
-        <img class="slot-psy-bg" src="${esc(psychubeFrameSrc(psy.star))}" alt="" aria-hidden="true" loading="eager" decoding="async" />
-        <img class="slot-psy-icon" src="${esc(psychubeIconSrc(psy.id))}" alt="${esc(pName)}" loading="eager" decoding="async" />
+        <img class="slot-psy-bg" src="${esc(psychubeFrameSrc(psy.star))}" alt="" aria-hidden="true" loading="lazy" decoding="async" />
+        <img class="slot-psy-icon" src="${esc(psychubeIconSrc(psy.id))}" alt="${esc(pName)}" loading="lazy" decoding="async" />
       </span>
       <span class="slot-psy-tooltip">${esc(pName)} · ${psy.star}★ ${esc(pStat)}</span>
     </div>`;
@@ -2051,7 +2103,7 @@ function renderFormationHtml(team, carryStr, psychubes = [], lang = getLang()) {
         <div class="formation-unit">
           <div class="formation-slot is-flex has-portrait" title="${esc(fmt.title)}">
             <div class="slot-flex-collage ${gridClass}">
-              ${pics.map((c) => `<img src="${esc(c.portrait)}" alt="${esc(displayCharacterName(c.name, lang))}" loading="eager" decoding="async" />`).join('')}
+              ${pics.map((c) => `<img src="${esc(c.portrait)}" alt="${esc(displayCharacterName(c.name, lang))}" loading="lazy" decoding="async" />`).join('')}
             </div>
             <div class="slot-vignette" aria-hidden="true"></div>
             <span class="slot-flex-tag">${esc(fmt.tag)}</span>
@@ -2066,7 +2118,7 @@ function renderFormationHtml(team, carryStr, psychubes = [], lang = getLang()) {
       return `
         <div class="formation-unit">
           <div class="formation-slot is-wild" title="${esc(fmt.title)}">
-            <img class="slot-card-bg" src="./assets/uttu/bg_kapaidi.png" alt="" aria-hidden="true" loading="eager" decoding="async" />
+            <img class="slot-card-bg" src="./assets/uttu/bg_kapaidi.png" alt="" aria-hidden="true" loading="lazy" decoding="async" />
             <div class="slot-wild-body" aria-hidden="true">
               <span class="slot-wild-glyph">✦</span>
               <span class="slot-wild-sub">${esc(fmt.sub)}</span>
@@ -2088,7 +2140,7 @@ function renderFormationHtml(team, carryStr, psychubes = [], lang = getLang()) {
     const hasPortrait = Boolean(char?.portrait);
     const raritySrc = rarityOverlaySrc(char?.star || 6);
     const affHtml = aff.icon
-      ? `<img class="slot-aff-img" src="${esc(aff.icon)}" alt="${esc(affDisplay)}" loading="eager" decoding="async" />`
+      ? `<img class="slot-aff-img" src="${esc(aff.icon)}" alt="${esc(affDisplay)}" loading="lazy" decoding="async" />`
       : `<span class="slot-ribbon" style="background:${aff.ribbon}" aria-label="${esc(affDisplay)}">${afflatusSvg(affKey)}</span>`;
     const tooltip = [
       displayName,
@@ -2100,13 +2152,13 @@ function renderFormationHtml(team, carryStr, psychubes = [], lang = getLang()) {
     return `
       <div class="formation-unit">
         <div class="formation-slot is-clickable ${isCarry ? 'is-carry' : ''} ${hasPortrait ? 'has-portrait' : ''}" data-open-char="${esc(char ? char.name : rawName)}" role="button" tabindex="0" title="${esc(tooltip)}">
-          <img class="slot-card-bg" src="./assets/uttu/bg_kapaidi.png" alt="" aria-hidden="true" loading="eager" decoding="async" />
+          <img class="slot-card-bg" src="./assets/uttu/bg_kapaidi.png" alt="" aria-hidden="true" loading="lazy" decoding="async" />
           <div class="slot-center" aria-hidden="true">
             ${insightWatermarkSvg()}
             <span class="slot-monogram">${esc(mono)}</span>
           </div>
-          ${hasPortrait ? `<img class="slot-portrait" src="${esc(char.portrait)}" alt="${esc(displayName)}" loading="eager" decoding="async" onerror="this.closest('.formation-slot')?.classList.remove('has-portrait');this.remove()" />` : ''}
-          <img class="slot-rarity-layer" src="${esc(raritySrc)}" alt="" aria-hidden="true" loading="eager" decoding="async" />
+          ${hasPortrait ? `<img class="slot-portrait" src="${esc(char.portrait)}" alt="${esc(displayName)}" loading="lazy" decoding="async" onerror="this.closest('.formation-slot')?.classList.remove('has-portrait');this.remove()" />` : ''}
+          <img class="slot-rarity-layer" src="${esc(raritySrc)}" alt="" aria-hidden="true" loading="lazy" decoding="async" />
           <div class="slot-vignette" aria-hidden="true"></div>
           ${affHtml}
           ${isCarry ? `<span class="slot-carry-tag">${esc(mainTag)}</span>` : ''}
@@ -2126,10 +2178,10 @@ function renderCarryAvatarHtml(carryName, lang = getLang()) {
   if (char?.portrait) {
     return `
       <span class="carry-avatar" title="${esc(displayName)} · ${esc(affDisplay)}">
-        <img class="carry-avatar-pic" src="${esc(char.portrait)}" alt="${esc(displayName)}" loading="eager" decoding="async" onerror="this.remove()" />
-        <img class="carry-avatar-rar" src="${esc(rarityOverlaySrc(char.star || 6))}" alt="" aria-hidden="true" loading="eager" />
+        <img class="carry-avatar-pic" src="${esc(char.portrait)}" alt="${esc(displayName)}" loading="lazy" decoding="async" onerror="this.remove()" />
+        <img class="carry-avatar-rar" src="${esc(rarityOverlaySrc(char.star || 6))}" alt="" aria-hidden="true" loading="lazy" decoding="async" />
         ${aff.icon
-          ? `<img class="carry-avatar-aff-img" src="${esc(aff.icon)}" alt="${esc(affDisplay)}" loading="eager" />`
+          ? `<img class="carry-avatar-aff-img" src="${esc(aff.icon)}" alt="${esc(affDisplay)}" loading="lazy" decoding="async" />`
           : `<span class="carry-avatar-aff" style="background:${aff.ribbon}">${afflatusSvg(affKey)}</span>`}
       </span>`;
   }
@@ -2139,7 +2191,7 @@ function renderCarryAvatarHtml(carryName, lang = getLang()) {
 function renderRankBadge(rank, lang = getLang()) {
   const aria = t('rankAria', { rank }, lang);
   if (rank === 1 || rank === 2 || rank === 3) {
-    return `<span class="rank-badge medal r${rank} has-official-badge" aria-label="${esc(aria)}"><img class="rank-badge-img" src="./assets/official/ranking-${rank}.png" alt="#${rank}" loading="eager" decoding="async" /></span>`;
+    return `<span class="rank-badge medal r${rank} has-official-badge" aria-label="${esc(aria)}"><img class="rank-badge-img" src="./assets/official/ranking-${rank}.png" alt="#${rank}" loading="lazy" decoding="async" /></span>`;
   }
   return `<span class="rank-badge" aria-label="${esc(aria)}">${String(rank).padStart(2, '0')}</span>`;
 }
@@ -2150,7 +2202,7 @@ function renderGradeStamp(score, lang = getLang()) {
   if (g.img) {
     return `
       <span class="grade-badge-wrap ${g.tier}" title="${esc(titleText)}">
-        <img class="grade-badge-img" src="${esc(g.img)}" alt="${esc(g.subGrade || g.grade)}" loading="eager" decoding="async" />
+        <img class="grade-badge-img" src="${esc(g.img)}" alt="${esc(g.subGrade || g.grade)}" loading="lazy" decoding="async" />
         ${g.tag ? `<span class="grade-mythic-pill">${esc(g.tag)}</span>` : ''}
       </span>`;
   }
@@ -2806,7 +2858,7 @@ function renderBoardIntelBar(mode, ranked, allBoardRecords, lang = getLang()) {
                   <button type="button" class="intel-bar-row" data-meta-carry="${esc(key)}" data-meta-mode="${esc(mode)}" title="${esc(info.label)} · ${esc(formatEntries(info.count, lang))} (${rate}%)">
                     <span class="intel-bar-avatar">
                       ${info.portrait
-                        ? `<img src="${esc(info.portrait)}" alt="${esc(info.label)}" loading="eager" decoding="async" />`
+                        ? `<img src="${esc(info.portrait)}" alt="${esc(info.label)}" loading="lazy" decoding="async" />`
                         : `<span class="char-slot-mono">${esc(characterMonogram(info.label))}</span>`}
                     </span>
                     <span class="intel-bar-main">
@@ -2835,7 +2887,7 @@ function renderBoardIntelBar(mode, ranked, allBoardRecords, lang = getLang()) {
                       <button type="button" class="intel-bar-row" data-meta-member="${esc(key)}" data-meta-mode="${esc(mode)}" title="${esc(info.label)} · ${esc(formatEntries(info.count, lang))} (${rate}%)">
                         <span class="intel-bar-avatar">
                           ${info.portrait
-                            ? `<img src="${esc(info.portrait)}" alt="${esc(info.label)}" loading="eager" decoding="async" />`
+                            ? `<img src="${esc(info.portrait)}" alt="${esc(info.label)}" loading="lazy" decoding="async" />`
                             : `<span class="char-slot-mono">${esc(characterMonogram(info.label))}</span>`}
                         </span>
                         <span class="intel-bar-main">
@@ -2863,7 +2915,7 @@ function renderBoardIntelBar(mode, ranked, allBoardRecords, lang = getLang()) {
                     const pName = displayPsychubeName(psy, lang);
                     return `
                       <button type="button" class="intel-psy-chip" data-open-psy="${esc(psy.id)}" title="${esc(pName)} ×${count}">
-                        <img src="${esc(psychubeIconSrc(psy.id))}" alt="" aria-hidden="true" loading="eager" decoding="async" />
+                        <img src="${esc(psychubeIconSrc(psy.id))}" alt="" aria-hidden="true" loading="lazy" decoding="async" />
                         <span>${esc(pName)}</span>
                         <strong style="color:var(--gold);font-size:10px">×${count}</strong>
                       </button>`;
@@ -3761,7 +3813,7 @@ async function fillManeDailyResults(host) {
         ? `<div class="daily-mini-lineup" style="margin-top:4px">${miniSlots.slice(0, 4).map((s) => {
             if (s.type === 'char' && s.char?.portrait) {
               const cName = displayCharacterName(s.char.name, lang);
-              return `<span class="daily-mini-card" data-open-char="${esc(s.char.name)}" role="button" tabindex="0" style="cursor:pointer" title="${esc(cName)}"><img src="${esc(s.char.portrait)}" alt="${esc(cName)}" loading="eager" decoding="async" /></span>`;
+              return `<span class="daily-mini-card" data-open-char="${esc(s.char.name)}" role="button" tabindex="0" style="cursor:pointer" title="${esc(cName)}"><img src="${esc(s.char.portrait)}" alt="${esc(cName)}" loading="lazy" decoding="async" /></span>`;
             }
             return '';
           }).join('')}</div>`
@@ -4010,7 +4062,7 @@ function renderManeWorkspace() {
               const affIconsHtml = (mArt.weakness || []).length
                 ? `<span class="dossier-aff-icons">${mArt.weakness.map((k) => {
                     const meta = AFFLATUS_META[k];
-                    return meta?.icon ? `<img src="${esc(meta.icon)}" alt="${esc(localizeAfflatus(k, lang))}" loading="eager" />` : '';
+                    return meta?.icon ? `<img src="${esc(meta.icon)}" alt="${esc(localizeAfflatus(k, lang))}" loading="lazy" decoding="async" />` : '';
                   }).join('')}</span>`
                 : '';
               const subText = m.opens_at
@@ -4101,7 +4153,7 @@ function renderManeWorkspace() {
           <span class="boss-stamp-edge" aria-hidden="true"></span>
           ${bossAsset.thumb ? `<div class="boss-header-backdrop" style="background-image:url('${esc(bossAsset.thumb)}');background-position:${esc(bossAsset.pos)}" aria-hidden="true"></div>` : ''}
           <span class="boss-wanted-wm" aria-hidden="true">WANTED</span>
-          ${isWideCutout ? `<img class="boss-header-cutout" src="${esc(bossAsset.hero)}" alt="" aria-hidden="true" loading="eager" decoding="async" />` : ''}
+          ${isWideCutout ? `<img class="boss-header-cutout" src="${esc(bossAsset.hero)}" alt="" aria-hidden="true" loading="eager" fetchpriority="high" decoding="async" />` : ''}
           <div class="boss-header-scrim" aria-hidden="true"></div>
           <div class="board-title-stack">
             <div class="boss-tips-row">
@@ -4158,7 +4210,7 @@ function renderManeWorkspace() {
           : `<div class="empty-state">
                <span class="empty-glyph">✦</span>
                <h3>${esc(state.loading ? t('emptyTitleLoading', {}, lang) : (ranked.length ? t('emptyTitleFiltered', {}, lang) : t('emptyTitleEmpty', {}, lang)))}</h3>
-               <p>${esc(ranked.length ? t('emptyDescFiltered', {}, lang) : t('emptyDescMane', {}, lang))}</p>
+               <p>${esc(state.loading ? t('statusSyncing', {}, lang) : (ranked.length ? t('emptyDescFiltered', {}, lang) : t('emptyDescMane', {}, lang)))}</p>
                ${ranked.length ? `<button type="button" class="outline-btn" data-action="reset-mane-filter">${esc(t('clearFilter', {}, lang))}</button>` : (state.connected && isMapOpen(map) ? `<button type="button" class="copper-btn" data-action="open-submit">${esc(t('emptyActionSubmit', {}, lang))}</button>` : '')}
              </div>`
         }
@@ -4239,7 +4291,7 @@ function renderManeTotals(latestEdition, sectionMaps = []) {
                               const bArt = resolveBossAsset(m.name, state.maneSection);
                               return `
                               <li>
-                                ${bArt?.thumb ? `<img class="breakdown-boss-thumb" src="${esc(bArt.thumb)}" alt="" aria-hidden="true" loading="eager" />` : ''}
+                                ${bArt?.thumb ? `<img class="breakdown-boss-thumb" src="${esc(bArt.thumb)}" alt="" aria-hidden="true" loading="lazy" decoding="async" />` : ''}
                                 <strong>${esc(displayBossName(m.name, lang))}</strong> · <span style="display:inline;color:var(--copper-bright)">${formatScore(m.score, lang)}</span>
                                 <button type="button" class="text-link-btn" style="margin-left:8px" data-jump-mane-carry="${esc(row.carry_key)}" data-jump-carry-name="${esc(row.carry_name)}" data-jump-map="${esc(m.map_id)}">${esc(t('totalsWatchMap', {}, lang))}</button>
                                 <span>${esc(t('colInvestigator', {}, lang))}: <em class="is-player-name" style="font-style:normal">${esc(m.player)}</em> · ${esc((m.team || []).map((n) => displayCharacterName(n, lang)).join(teamJoiner))}</span>
@@ -4418,7 +4470,7 @@ function renderManePlayers() {
                             ${p.favChars.map(({ char }) => {
                               const cDisp = displayCharacterName(char.name, lang);
                               return char.portrait
-                                ? `<img src="${esc(char.portrait)}" alt="${esc(cDisp)}" title="${esc(cDisp)}" data-open-char="${esc(char.name)}" role="button" tabindex="0" style="cursor:pointer" loading="eager" decoding="async" />`
+                                ? `<img src="${esc(char.portrait)}" alt="${esc(cDisp)}" title="${esc(cDisp)}" data-open-char="${esc(char.name)}" role="button" tabindex="0" style="cursor:pointer" loading="lazy" decoding="async" />`
                                 : '';
                             }).join('')}
                           </div>` : ''}
@@ -4705,7 +4757,7 @@ function renderFlashbackWorkspace() {
                     <span class="dossier-badge">${esc(formatEntries(cnt, lang))}</span>
                   </span>
                 </button>`;
-            }).join('') || `<p class="sidebar-note">${esc(t('emptyTitleEmpty', {}, lang))}</p>`}
+            }).join('') || `<p class="sidebar-note">${esc(state.loading ? t('emptyTitleLoading', {}, lang) : t('emptyTitleEmpty', {}, lang))}</p>`}
           </div>
         </div>
 
@@ -4838,7 +4890,7 @@ function renderFlashbackWorkspace() {
             : (archives.length ? '' : `<div class="empty-state">
                  <span class="empty-glyph">✧</span>
                  <h3>${esc(state.loading ? t('emptyTitleLoading', {}, lang) : (hasFilter ? t('emptyTitleFiltered', {}, lang) : t('emptyTitleEmpty', {}, lang)))}</h3>
-                 <p>${esc(hasFilter ? t('emptyDescFiltered', {}, lang) : t('emptyDescFb', {}, lang))}</p>
+                 <p>${esc(state.loading ? t('statusSyncing', {}, lang) : (hasFilter ? t('emptyDescFiltered', {}, lang) : t('emptyDescFb', {}, lang)))}</p>
                  ${hasFilter ? `<button type="button" class="outline-btn" data-action="reset-fb-filter">${esc(t('clearFilter', {}, lang))}</button>` : (state.connected ? `<button type="button" class="copper-btn" data-action="open-submit">${esc(t('emptyActionSubmit', {}, lang))}</button>` : '')}
                </div>`)
           }
@@ -5142,7 +5194,7 @@ function renderFlashbackPlayers() {
                             ${p.favChars.map(({ char }) => {
                               const cDisp = displayCharacterName(char.name, lang);
                               return char.portrait
-                                ? `<img src="${esc(char.portrait)}" alt="${esc(cDisp)}" title="${esc(cDisp)}" data-open-char="${esc(char.name)}" role="button" tabindex="0" style="cursor:pointer" loading="eager" decoding="async" />`
+                                ? `<img src="${esc(char.portrait)}" alt="${esc(cDisp)}" title="${esc(cDisp)}" data-open-char="${esc(char.name)}" role="button" tabindex="0" style="cursor:pointer" loading="lazy" decoding="async" />`
                                 : '';
                             }).join('')}
                           </div>` : ''}
@@ -5965,7 +6017,7 @@ function bindManeScreenshot(form, maps) {
 
     const prepPromise = prepareProofForUpload(file, lang);
     form._preparedProofPromise = { sourceFile: file, promise: prepPromise };
-    const [prepOutcome, ocrOutcome] = await Promise.allSettled([prepPromise, recognizeManeScreenshot(file)]);
+    const [prepOutcome, ocrOutcome] = await Promise.allSettled([prepPromise, loadOcrModule().then((m) => m.recognizeManeScreenshot(file))]);
     if (!form.isConnected || request !== current) return;
 
     if (prepOutcome.status === 'fulfilled') {
@@ -6263,7 +6315,7 @@ function bindFlashbackScreenshot(form) {
 
     const prepPromise = prepareProofForUpload(file, lang);
     form._preparedProofPromise = { sourceFile: file, promise: prepPromise };
-    const [prepOutcome, ocrOutcome] = await Promise.allSettled([prepPromise, recognizeFlashbackScreenshot(file)]);
+    const [prepOutcome, ocrOutcome] = await Promise.allSettled([prepPromise, loadOcrModule().then((m) => m.recognizeFlashbackScreenshot(file))]);
     if (!form.isConnected || current !== request) return;
 
     if (prepOutcome.status === 'fulfilled') {
@@ -7253,6 +7305,11 @@ document.addEventListener('click', async (ev) => {
     if (btn.dataset.setLang) {
       const nextLang = setLang(btn.dataset.setLang);
       updateUrlLangParam(nextLang);
+      try {
+        await ensureLangPack(nextLang);
+      } catch (err) {
+        console.warn('Language pack load failed:', err);
+      }
       render();
       if (charPickerState.open) renderCharPicker();
       if (psyPickerState.open) renderPsychubePicker();
@@ -7829,6 +7886,7 @@ document.addEventListener('click', async (ev) => {
     }
     if (action === 'refresh') {
       if (isOfflineSandboxMode() && state.dataSource === 'offline') {
+        await ensureOfflineSnapshot();
         hydrateFromOfflineSnapshot();
         render();
         toast(t('toastRefreshed'));
@@ -7841,6 +7899,7 @@ document.addEventListener('click', async (ev) => {
     }
     if (action === 'refresh-mane-daily') {
       if (isOfflineSandboxMode() && state.dataSource === 'offline') {
+        await ensureOfflineSnapshot();
         hydrateFromOfflineSnapshot();
       } else {
         await ensureSupabaseClient();
@@ -8328,20 +8387,26 @@ window.addEventListener('hashchange', () => {
   render();
 });
 
-/* ==================== Offline-First Bootstrap ==================== */
+/* ==================== Offline-First / Lazy Bootstrap ==================== */
 async function bootstrap() {
-  initLang();
+  const lang = initLang();
   readHash();
-  hydrateFromOfflineSnapshot();
+  try {
+    await ensureLangPack(lang);
+  } catch (err) {
+    console.warn('Language pack load failed:', err);
+  }
   const cfg = window.LEADERBOARD_CONFIG;
   const useLive = !isOfflineSandboxMode() && Boolean(cfg?.supabaseUrl && cfg?.supabaseAnonKey);
   if (useLive) {
     state.dataSource = 'live';
-  }
-  render();
-
-  if (useLive) {
+    state.loading = true;
+    render();
     await syncLiveArchive({ silent: true });
+  } else {
+    await ensureOfflineSnapshot();
+    hydrateFromOfflineSnapshot();
+    render();
   }
 }
 
