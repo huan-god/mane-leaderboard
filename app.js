@@ -2440,7 +2440,7 @@ function renderMasthead() {
       </div>`;
   } else {
     const activeVer = state.fbVersions.find((v) => v.id === state.fbVersionId) || state.fbVersions[0];
-    const activePlayers = state.fbPlayers.filter((p) => p.version_id === null).length;
+    const activePlayers = buildMergedFlashbackPlayers(state.fbVersionId).length;
     const peak = findFlashbackSitewidePeak();
     const peakArt = peak ? resolveFlashbackStageArt(peak.stage) : null;
     const peakSource = peak
@@ -4984,12 +4984,73 @@ function renderFlashbackCarries() {
     </div>`;
 }
 
+function buildMergedFlashbackPlayers(versionId = state.fbVersionId) {
+  const stageById = new Map(state.fbStages.map((s) => [s.id, s]));
+  const byName = new Map();
+
+  for (const rec of state.fbRecords) {
+    const rawName = String(rec.display_name || '').trim();
+    const nameKey = normKey(rawName);
+    if (!nameKey) continue;
+
+    let entry = byName.get(nameKey);
+    if (!entry) {
+      entry = {
+        key: nameKey,
+        display_name: rawName,
+        latestAt: rec.created_at || '',
+        periodKeys: new Set(),
+        allTimeKeys: new Set()
+      };
+      byName.set(nameKey, entry);
+    } else if (rec.created_at && (!entry.latestAt || String(rec.created_at) > String(entry.latestAt))) {
+      entry.display_name = rawName;
+      entry.latestAt = rec.created_at;
+    }
+
+    const stage = stageById.get(rec.stage_id);
+    const recVersionId = rec.version_id || stage?.version_id || null;
+    const challenge = stage?.challenge_id || rec.stage_id;
+    const teamKey = rec.team_key || canonicalTeam(rec.team || []);
+
+    entry.allTimeKeys.add(JSON.stringify([challenge, rec.group_code, teamKey]));
+    if (versionId && recVersionId === versionId) {
+      entry.periodKeys.add(JSON.stringify([rec.stage_id, rec.group_code, teamKey]));
+    }
+  }
+
+  // Fallback for view-only players not present in active records, merged by display name
+  const fallbackByName = new Map();
+  for (const p of state.fbPlayers) {
+    const rawName = String(p.display_name || '').trim();
+    const nameKey = normKey(rawName);
+    if (!nameKey || byName.has(nameKey)) continue;
+
+    let entry = fallbackByName.get(nameKey);
+    if (!entry) {
+      entry = { key: nameKey, display_name: rawName, periodCount: 0, appearance_count: 0 };
+      fallbackByName.set(nameKey, entry);
+    }
+    const count = Number(p.appearance_count || 0);
+    if (p.version_id === null) entry.appearance_count += count;
+    else if (versionId && p.version_id === versionId) entry.periodCount += count;
+  }
+
+  return [
+    ...[...byName.values()].map((entry) => ({
+      key: entry.key,
+      display_name: entry.display_name,
+      periodCount: entry.periodKeys.size,
+      appearance_count: entry.allTimeKeys.size
+    })),
+    ...[...fallbackByName.values()].filter((entry) => entry.appearance_count > 0 || entry.periodCount > 0)
+  ];
+}
+
 function renderFlashbackPlayers() {
   const lang = getLang();
   const locale = isEn(lang) ? 'en' : 'zh-CN';
   const version = state.fbVersions.find((v) => v.id === state.fbVersionId);
-  const period = new Map(state.fbPlayers.filter((p) => p.version_id === state.fbVersionId)
-    .map((p) => [p.player_id, p.appearance_count]));
 
   // Aggregate Flashback crowns, podiums & favorite carries per player
   const fbMetaByPlayer = new Map();
@@ -5021,20 +5082,18 @@ function renderFlashbackPlayers() {
     });
   }
 
-  const rows = state.fbPlayers.filter((p) => p.version_id === null)
+  const rows = buildMergedFlashbackPlayers(state.fbVersionId)
     .map((p) => {
-      const m = fbMetaByPlayer.get(normKey(p.display_name));
+      const m = fbMetaByPlayer.get(p.key);
       return {
         ...p,
-        periodCount: period.get(p.player_id) || 0,
         crowns: m?.crowns || 0,
         podiums: m?.podiums || 0,
         favChars: m ? [...m.carries.values()].sort((a, b) => b.count - a.count).slice(0, 3) : []
       };
     })
     .sort((a, b) => (b.periodCount - a.periodCount) || (b.appearance_count - a.appearance_count) ||
-      String(a.display_name).localeCompare(String(b.display_name), locale) ||
-      String(a.player_id).localeCompare(String(b.player_id)));
+      String(a.display_name).localeCompare(String(b.display_name), locale));
 
   return `
     <div class="section-bar">
