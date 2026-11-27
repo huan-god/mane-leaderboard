@@ -2829,12 +2829,9 @@ function renderRowIntelColumnHtml({
   const resCount = resonanceCodes.filter(Boolean).length;
   const resBadge = resCount > 0 ? `<span class="row-res-badge">${esc(t('rowResCodesCount', { n: resCount }, lang))}</span>` : '';
 
-  // 2. Relative-to-Peak Gauge (Mane only: Collector's Edition uses numberless I-VI appraisal rail; Anomaly Gallery uses warm segmented bar)
+  // 2. Boss Mechanism Appraisal Rail (Collector's Edition I–VI stages only; omit relative-to-peak %)
   let peakMeterHtml = '';
   if (isMane) {
-    const peakVal = boardPeak ? Number(boardPeak.score || 0) : Number(record.score || 0);
-    const curVal = Number(record.score || 0);
-    const pct = rank === 1 ? 100 : (peakVal > 0 ? Math.min(100, Math.max(2, Math.round((curVal / peakVal) * 100))) : 100);
     const appraisal = mapName ? getBossThresholdProgress(mapName, record.score, lang) : null;
     const thresholds = appraisal?.thresholds || [];
     if (thresholds.length) {
@@ -2848,19 +2845,8 @@ function renderRowIntelColumnHtml({
         return node + link;
       }).join('');
       peakMeterHtml = `
-        <div class="row-peak-meter ${rank === 1 ? 'is-peak' : ''} has-appraisal-rail">
+        <div class="row-peak-meter has-appraisal-rail">
           <div class="row-appraisal-rail" aria-label="${esc(t('appraisalActiveLabel', {}, lang))}">${railHtml}</div>
-          <div class="row-peak-text">
-            <span>${rank === 1 ? `<strong>${esc(t('rowPeakRecord', {}, lang))}</strong>` : esc(t('rowVsPeak', { pct }, lang))}</span>
-          </div>
-        </div>`;
-    } else {
-      peakMeterHtml = `
-        <div class="row-peak-meter ${rank === 1 ? 'is-peak' : ''}">
-          <div class="row-peak-bar"><div class="row-peak-fill" style="width:${pct}%"></div></div>
-          <div class="row-peak-text">
-            <span>${rank === 1 ? `<strong>${esc(t('rowPeakRecord', {}, lang))}</strong>` : esc(t('rowVsPeak', { pct }, lang))}</span>
-          </div>
         </div>`;
     }
   }

@@ -508,7 +508,7 @@ export const DICTS = {
     footerDisclaimer: 'Unofficial fan-run community archive, not affiliated with Bluepoch. Please avoid exposing private account credentials in screenshots.',
 
     // V2 Column Header & Board Intelligence / Meta Analytics Strip
-    colTactical: 'ARCHETYPE · PEAK',
+    colTactical: 'ARCHETYPE',
     colArchetype: 'ARCHETYPE',
     intelTitle: 'Board Intelligence',
     intelSubtitle: 'Live meta snapshot of carries, supports, Psychubes, and score distribution on this board.',
@@ -1029,7 +1029,7 @@ export const DICTS = {
     footerDisclaimer: '本网站为非官方玩家共建社区项目，与游戏发行方无隶属关系。请勿在成绩截图中暴露个人敏感信息。',
 
     // V2 列头与榜单情报分析条
-    colTactical: '流派 · 峰值',
+    colTactical: '流派',
     colArchetype: '流派',
     intelTitle: '榜单情报分析',
     intelSubtitle: '当前分榜热门主 C、高频辅助、心相分布与成绩区间实时洞察。',

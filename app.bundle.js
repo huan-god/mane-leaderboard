@@ -475,7 +475,7 @@
       footerWikiFb: "Fandom Wiki · Focused Flashback ↗",
       footerDisclaimer: "Unofficial fan-run community archive, not affiliated with Bluepoch. Please avoid exposing private account credentials in screenshots.",
       // V2 Column Header & Board Intelligence / Meta Analytics Strip
-      colTactical: "ARCHETYPE · PEAK",
+      colTactical: "ARCHETYPE",
       colArchetype: "ARCHETYPE",
       intelTitle: "Board Intelligence",
       intelSubtitle: "Live meta snapshot of carries, supports, Psychubes, and score distribution on this board.",
@@ -978,7 +978,7 @@
       footerWikiFb: "灰机 Wiki · 焦点闪回 ↗",
       footerDisclaimer: "本网站为非官方玩家共建社区项目，与游戏发行方无隶属关系。请勿在成绩截图中暴露个人敏感信息。",
       // V2 列头与榜单情报分析条
-      colTactical: "流派 · 峰值",
+      colTactical: "流派",
       colArchetype: "流派",
       intelTitle: "榜单情报分析",
       intelSubtitle: "当前分榜热门主 C、高频辅助、心相分布与成绩区间实时洞察。",
@@ -47172,9 +47172,6 @@
     const resBadge = resCount > 0 ? `<span class="row-res-badge">${esc(t("rowResCodesCount", { n: resCount }, lang))}</span>` : "";
     let peakMeterHtml = "";
     if (isMane) {
-      const peakVal = boardPeak ? Number(boardPeak.score || 0) : Number(record.score || 0);
-      const curVal = Number(record.score || 0);
-      const pct = rank === 1 ? 100 : peakVal > 0 ? Math.min(100, Math.max(2, Math.round(curVal / peakVal * 100))) : 100;
       const appraisal = mapName ? getBossThresholdProgress(mapName, record.score, lang) : null;
       const thresholds = appraisal?.thresholds || [];
       if (thresholds.length) {
@@ -47186,19 +47183,8 @@
           return node + link;
         }).join("");
         peakMeterHtml = `
-        <div class="row-peak-meter ${rank === 1 ? "is-peak" : ""} has-appraisal-rail">
+        <div class="row-peak-meter has-appraisal-rail">
           <div class="row-appraisal-rail" aria-label="${esc(t("appraisalActiveLabel", {}, lang))}">${railHtml}</div>
-          <div class="row-peak-text">
-            <span>${rank === 1 ? `<strong>${esc(t("rowPeakRecord", {}, lang))}</strong>` : esc(t("rowVsPeak", { pct }, lang))}</span>
-          </div>
-        </div>`;
-      } else {
-        peakMeterHtml = `
-        <div class="row-peak-meter ${rank === 1 ? "is-peak" : ""}">
-          <div class="row-peak-bar"><div class="row-peak-fill" style="width:${pct}%"></div></div>
-          <div class="row-peak-text">
-            <span>${rank === 1 ? `<strong>${esc(t("rowPeakRecord", {}, lang))}</strong>` : esc(t("rowVsPeak", { pct }, lang))}</span>
-          </div>
         </div>`;
       }
     }
