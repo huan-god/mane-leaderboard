@@ -4774,7 +4774,8 @@ body[data-mode="flashback"] .psy-chip.active {
   max-height: 76px;
   max-width: 140px;
   border-radius: 2px;
-  object-fit: cover;
+  object-fit: contain;
+  background: rgba(0, 0, 0, 0.35);
   border: 1px solid rgba(255, 255, 255, 0.12);
   cursor: zoom-in;
 }

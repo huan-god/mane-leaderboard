@@ -3,13 +3,63 @@ import {victoryTitles, roundDigits, knownCards, stageTitles, knownPsychubes} fro
 const titleColumns = 24;
 const titleRows = 8;
 
-function pixelsFor(image) {
+function detectContentBounds(image) {
+  const natW = image.naturalWidth;
+  const natH = image.naturalHeight;
+  const probeW = Math.min(400, natW);
+  const probeH = Math.max(1, Math.round(natH * probeW / natW));
+  const probe = document.createElement('canvas');
+  probe.width = probeW;
+  probe.height = probeH;
+  const pCtx = probe.getContext('2d', {willReadFrequently: true});
+  pCtx.drawImage(image, 0, 0, natW, natH, 0, 0, probeW, probeH);
+  const {data} = pCtx.getImageData(0, 0, probeW, probeH);
+
+  const isBlackRow = (y) => {
+    let black = 0;
+    const base = y * probeW * 4;
+    for (let x = 0; x < probeW; x++) {
+      const p = base + x * 4;
+      if (Math.max(data[p], data[p + 1], data[p + 2]) <= 8) black++;
+    }
+    return black / probeW >= 0.98;
+  };
+  let top = 0;
+  let bottom = probeH - 1;
+  const maxV = Math.floor(probeH * 0.25);
+  while (top < maxV && isBlackRow(top)) top++;
+  while (bottom > probeH - 1 - maxV && bottom > top + 80 && isBlackRow(bottom)) bottom--;
+
+  const isBlackCol = (x) => {
+    let black = 0;
+    const rows = bottom - top + 1;
+    for (let y = top; y <= bottom; y++) {
+      const p = (y * probeW + x) * 4;
+      if (Math.max(data[p], data[p + 1], data[p + 2]) <= 8) black++;
+    }
+    return black / rows >= 0.98;
+  };
+  let left = 0;
+  let right = probeW - 1;
+  const maxH = Math.floor(probeW * 0.25);
+  while (left < maxH && isBlackCol(left)) left++;
+  while (right > probeW - 1 - maxH && right > left + 120 && isBlackCol(right)) right--;
+
+  const sx = Math.round(left * natW / probeW);
+  const sy = Math.round(top * natH / probeH);
+  const sw = Math.round((right + 1) * natW / probeW) - sx;
+  const sh = Math.round((bottom + 1) * natH / probeH) - sy;
+  if (sw < 480 || sh < 260) return {x: 0, y: 0, w: natW, h: natH};
+  return {x: sx, y: sy, w: sw, h: sh};
+}
+
+function pixelsFor(image, rect) {
   const canvas = document.createElement('canvas');
-  const scale = Math.min(720 / image.naturalWidth, 1);
-  canvas.width = Math.round(image.naturalWidth * scale);
-  canvas.height = Math.round(image.naturalHeight * scale);
+  const scale = Math.min(1, Math.min(960 / rect.w, Math.max(720 / rect.w, 405 / rect.h)));
+  canvas.width = Math.round(rect.w * scale);
+  canvas.height = Math.round(rect.h * scale);
   const context = canvas.getContext('2d', {willReadFrequently: true});
-  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  context.drawImage(image, rect.x, rect.y, rect.w, rect.h, 0, 0, canvas.width, canvas.height);
   const {width, height, data} = context.getImageData(0, 0, canvas.width, canvas.height);
   const stride = width + 1;
   const bright = new Uint32Array(stride * (height + 1));
@@ -74,7 +124,9 @@ function findVictoryTitle(pixels) {
       }
     }
   }
-  for (let w = Math.max(52, Math.round(width * 0.11)); w <= width * 0.34; w += 5) {
+  const minW = Math.max(48, Math.round(Math.min(width * 0.09, height * 0.22)));
+  const maxW = Math.min(width * 0.42, height * 0.65);
+  for (let w = minW; w <= maxW; w += 5) {
     const h = Math.round(w * 0.246);
     for (let y = 1; y < height * 0.55; y += 4) {
       for (let x = 0; x < width * 0.54 && x + w < width; x += 4) compare({x,y,w,h});
@@ -274,10 +326,11 @@ async function decode(file) {
 
 export async function recognizeFlashbackScreenshot(file) {
   const image=await decode(file);
-  if (image.naturalWidth<540 || image.naturalHeight<300) return null;
-  const aspectRatio = image.naturalWidth / image.naturalHeight;
-  if (aspectRatio < 1.2 || aspectRatio > 3) return null;
-  const pixels=pixelsFor(image);
+  if (image.naturalWidth<480 || image.naturalHeight<260) return null;
+  const rect=detectContentBounds(image);
+  const aspectRatio = rect.w / rect.h;
+  if (aspectRatio < 1.15 || aspectRatio > 3.1) return null;
+  const pixels=pixelsFor(image, rect);
   const title=findVictoryTitle(pixels);
   if (!title || !hasStageTitle(pixels,title)) return null;
   const stageA=stageNumber(pixels,title,107);

@@ -84,6 +84,105 @@ const MIME_TO_EXT = {
   'image/jpeg': 'jpg',
   'image/webp': 'webp'
 };
+const MAX_PROOF_UPLOAD_BYTES = 5 * 1024 * 1024;
+const TARGET_PROOF_BYTES = Math.floor(4.75 * 1024 * 1024);
+const MAX_PROOF_RAW_BYTES = 30 * 1024 * 1024;
+
+function resolveProofMime(file) {
+  if (!file) return '';
+  let type = String(file.type || '').toLowerCase().trim();
+  if (type === 'image/jpg') type = 'image/jpeg';
+  if (MIME_TO_EXT[type]) return type;
+  const name = String(file.name || '').toLowerCase();
+  if (name.endsWith('.png')) return 'image/png';
+  if (name.endsWith('.jpg') || name.endsWith('.jpeg')) return 'image/jpeg';
+  if (name.endsWith('.webp')) return 'image/webp';
+  return '';
+}
+
+function formatProofBytes(bytes) {
+  return bytes >= 1024 * 1024
+    ? `${(bytes / (1024 * 1024)).toFixed(2)} MB`
+    : `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+function canvasToBlobAsync(canvas, mime, quality) {
+  return new Promise((resolve) => canvas.toBlob(resolve, mime, quality));
+}
+
+async function prepareProofForUpload(file) {
+  if (!file || !file.size) throw new Error('请上传结算截图。');
+  const mime = resolveProofMime(file);
+  if (!mime) throw new Error('仅支持 PNG、JPG 或 WebP 格式截图。');
+  if (file.size > MAX_PROOF_RAW_BYTES) {
+    throw new Error('截图文件超过 30 MB 上限，请先裁剪或压缩后再上传。');
+  }
+  const img = await decodeImageFile(file);
+  if (file.size <= MAX_PROOF_UPLOAD_BYTES) {
+    return {
+      uploadFile: file,
+      mime,
+      originalSize: file.size,
+      finalSize: file.size,
+      width: img.naturalWidth,
+      height: img.naturalHeight,
+      compressed: false
+    };
+  }
+
+  const baseName = String(file.name || 'proof').replace(/\.[^.]+$/, '') || 'proof';
+  const maxEdges = [2560, 1920, 1600, 1280];
+  const attempts = [
+    ['image/webp', 0.90],
+    ['image/webp', 0.82],
+    ['image/webp', 0.72],
+    ['image/jpeg', 0.90],
+    ['image/jpeg', 0.82],
+    ['image/jpeg', 0.72],
+    ['image/jpeg', 0.60]
+  ];
+  const natW = img.naturalWidth;
+  const natH = img.naturalHeight;
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('截图文件大小不能超过 5 MB。');
+
+  for (const maxEdge of maxEdges) {
+    const scale = Math.min(1, maxEdge / Math.max(natW, natH));
+    canvas.width = Math.max(1, Math.round(natW * scale));
+    canvas.height = Math.max(1, Math.round(natH * scale));
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    for (const [outMime, quality] of attempts) {
+      const blob = await canvasToBlobAsync(canvas, outMime, quality);
+      if (blob && blob.size > 0 && blob.size <= TARGET_PROOF_BYTES && MIME_TO_EXT[blob.type]) {
+        const uploadFile = new File([blob], `${baseName}.${MIME_TO_EXT[blob.type]}`, { type: blob.type });
+        return {
+          uploadFile,
+          mime: blob.type,
+          originalSize: file.size,
+          finalSize: blob.size,
+          width: natW,
+          height: natH,
+          compressed: true
+        };
+      }
+    }
+  }
+  throw new Error('截图自动压缩后仍超过 5 MB，请先适当裁剪分辨率后再上传。');
+}
+
+async function getPreparedProofForForm(form, file) {
+  if (!file || !file.size) throw new Error('请上传不超过 5 MB 的 PNG、JPG 或 WebP 截图。');
+  if (form._preparedProof?.sourceFile === file) return form._preparedProof;
+  if (form._preparedProofPromise?.sourceFile === file) {
+    const resolved = { sourceFile: file, ...(await form._preparedProofPromise.promise) };
+    form._preparedProof = resolved;
+    return resolved;
+  }
+  const resolved = { sourceFile: file, ...(await prepareProofForUpload(file)) };
+  form._preparedProof = resolved;
+  return resolved;
+}
 
 const DEFAULT_MODE = location.pathname.toLowerCase().includes('flashback') ? 'flashback' : 'mane';
 
@@ -899,15 +998,64 @@ function clearUploadPreview(host) {
   }
 }
 
-function renderUploadPreview(host, file) {
+function updateUploadPreviewMeta(host, file, extraMeta = '') {
+  if (!host || !file) return;
+  const metaEl = host.querySelector('.proof-upload-meta');
+  if (!metaEl) return;
+  metaEl.textContent = `${file.name} · ${formatProofBytes(file.size)}${extraMeta ? ` · ${extraMeta}` : ''}（点击图片可放大）`;
+}
+
+function renderUploadPreview(host, file, extraMeta = '') {
   clearUploadPreview(host);
-  if (!host || !file || !MIME_TO_EXT[file.type] || file.size > 5 * 1024 * 1024) return;
+  const mime = resolveProofMime(file);
+  if (!host || !file || !mime || file.size > MAX_PROOF_RAW_BYTES) return;
   activeUploadPreviewUrl = URL.createObjectURL(file);
-  const sizeKb = file.size >= 1024 * 1024
-    ? `${(file.size / (1024 * 1024)).toFixed(2)} MB`
-    : `${Math.max(1, Math.round(file.size / 1024))} KB`;
-  host.innerHTML = `<img src="${esc(activeUploadPreviewUrl)}" alt="已选截图预览" title="点击放大预览" /><span class="proof-upload-meta">${esc(file.name)} · ${sizeKb}（点击图片可放大）</span>`;
+  host.innerHTML = `<img src="${esc(activeUploadPreviewUrl)}" alt="已选截图预览" title="点击放大预览" /><span class="proof-upload-meta"></span>`;
+  updateUploadPreviewMeta(host, file, extraMeta);
   host.hidden = false;
+}
+
+async function runScreenshotSelection({ form, file, preview, note, analyzingLabel, recognizeFn }) {
+  form._preparedProof = null;
+  form._preparedProofPromise = null;
+  clearUploadPreview(preview);
+  if (!file || !file.size) {
+    note.textContent = '';
+    return null;
+  }
+  const mime = resolveProofMime(file);
+  if (!mime) {
+    note.textContent = '仅支持 PNG、JPG 或 WebP 格式截图。';
+    return null;
+  }
+  if (file.size > MAX_PROOF_RAW_BYTES) {
+    note.textContent = '截图文件超过 30 MB 上限，请先裁剪或压缩后再上传。';
+    return null;
+  }
+  renderUploadPreview(preview, file);
+  note.textContent = file.size > MAX_PROOF_UPLOAD_BYTES
+    ? `截图超过 5 MB，正在自动压缩并${analyzingLabel}…`
+    : `正在${analyzingLabel}…`;
+
+  const prepPromise = prepareProofForUpload(file);
+  form._preparedProofPromise = { sourceFile: file, promise: prepPromise };
+  const [prepOutcome, ocrOutcome] = await Promise.allSettled([prepPromise, recognizeFn(file)]);
+  return { prepOutcome, ocrOutcome };
+}
+
+function applyScreenshotPrepOutcome(form, preview, note, file, prepOutcome) {
+  if (prepOutcome.status === 'fulfilled') {
+    form._preparedProof = { sourceFile: file, ...prepOutcome.value };
+    if (prepOutcome.value.compressed) {
+      const tag = `已自动压缩至 ${formatProofBytes(prepOutcome.value.finalSize)}`;
+      updateUploadPreviewMeta(preview, file, tag);
+      return { ok: true, compSuffix: ` · ${tag}` };
+    }
+    return { ok: true, compSuffix: '' };
+  }
+  clearUploadPreview(preview);
+  note.textContent = prepOutcome.reason?.message || '截图文件大小不能超过 5 MB。';
+  return { ok: false, compSuffix: '' };
 }
 
 function openProofLightbox(src, alt = '截图放大预览') {
@@ -3571,62 +3719,72 @@ function bindManeScreenshot(form, maps) {
     refreshBuildSlotsGrid();
 
     const file = proof.files[0];
-    renderUploadPreview(preview, file);
-    if (!file || !MIME_TO_EXT[file.type] || file.size > 5 * 1024 * 1024) {
-      note.textContent = '';
+    const outcome = await runScreenshotSelection({
+      form,
+      file,
+      preview,
+      note,
+      analyzingLabel: '识别结算截图',
+      recognizeFn: async (f) => {
+        const { recognizeManeScreenshot } = await import('./mane-screenshot.js?v=20261127-ocr-fix');
+        return recognizeManeScreenshot(f);
+      }
+    });
+    if (!outcome || !form.isConnected || request !== current) return;
+
+    const { ok, compSuffix } = applyScreenshotPrepOutcome(form, preview, note, file, outcome.prepOutcome);
+    if (!ok) return;
+
+    if (outcome.ocrOutcome.status === 'rejected') {
+      note.textContent = `暂时无法识别这张截图，请手动填写。${compSuffix}`;
       return;
     }
-    note.textContent = '正在识别结算截图…';
-    try {
-      const { recognizeManeScreenshot } = await import('./mane-screenshot.js?v=20261123-readout');
-      const result = await recognizeManeScreenshot(file);
-      if (!form.isConnected || request !== current) return;
-      if (!result) {
-        note.textContent = '这张图的结算版式或关卡未识别，请手动填写。';
-        return;
-      }
 
-      const match = maps.find((map) => map.name.replace('饥谨', '饥馑') === result.mapName);
-      if (match && !mapEdited) {
-        const previous = mapField.value;
-        mapField.value = match.id;
-        undoPrefill.push(() => {
-          if (!mapEdited && mapField.value === match.id) mapField.value = previous;
-        });
-      }
-      if (result.score && !scoreField.value) {
-        scoreField.value = result.score;
-        undoPrefill.push(() => {
-          if (scoreField.value === result.score) scoreField.value = '';
-        });
-      }
-      for (const [i, { character, psychube }] of result.slots.entries()) {
-        if (!character) continue;
-        if (!modalBuildState.chars[i] && !modalBuildState.chars.includes(character)) {
-          modalBuildState.chars[i] = character;
-          undoPrefill.push(() => {
-            if (modalBuildState.chars[i] === character &&
-              !modalBuildState.carries[i] && !modalBuildState.psychubes[i] && !modalBuildState.resonanceCodes[i]) {
-              modalBuildState.chars[i] = '';
-            }
-          });
-        }
-        if (psychube && modalBuildState.chars[i] === character && !modalBuildState.psychubes[i]) {
-          modalBuildState.psychubes[i] = psychube;
-          undoPrefill.push(() => {
-            if (modalBuildState.chars[i] === character && modalBuildState.psychubes[i] === psychube) {
-              modalBuildState.psychubes[i] = '';
-            }
-          });
-        }
-      }
-      refreshBuildSlotsGrid();
-      const identifiedSlots = result.slots.filter((slot) => slot.character).length;
-      const identifiedPsychubes = result.slots.filter((slot) => slot.psychube).length;
-      note.textContent = `识别结果：${result.mapName} · ${result.score ? Number(result.score).toLocaleString('zh-CN') + ' 分' : '积分待确认'} · ${identifiedSlots} 个角色 / ${identifiedPsychubes} 个心相。请核对表单，补填其余信息后提交。`;
-    } catch {
-      if (form.isConnected && request === current) note.textContent = '暂时无法识别这张截图，请手动填写。';
+    const result = outcome.ocrOutcome.value;
+    if (!result) {
+      note.textContent = `这张图的结算版式或关卡未识别，请手动填写。${compSuffix}`;
+      return;
     }
+
+    const match = result.mapName ? maps.find((map) => map.name.replace('饥谨', '饥馑') === result.mapName) : null;
+    if (match && !mapEdited) {
+      const previous = mapField.value;
+      mapField.value = match.id;
+      undoPrefill.push(() => {
+        if (!mapEdited && mapField.value === match.id) mapField.value = previous;
+      });
+    }
+    if (result.score && !scoreField.value) {
+      scoreField.value = result.score;
+      undoPrefill.push(() => {
+        if (scoreField.value === result.score) scoreField.value = '';
+      });
+    }
+    for (const [i, { character, psychube }] of result.slots.entries()) {
+      if (!character) continue;
+      if (!modalBuildState.chars[i] && !modalBuildState.chars.includes(character)) {
+        modalBuildState.chars[i] = character;
+        undoPrefill.push(() => {
+          if (modalBuildState.chars[i] === character &&
+            !modalBuildState.carries[i] && !modalBuildState.psychubes[i] && !modalBuildState.resonanceCodes[i]) {
+            modalBuildState.chars[i] = '';
+          }
+        });
+      }
+      if (psychube && modalBuildState.chars[i] === character && !modalBuildState.psychubes[i]) {
+        modalBuildState.psychubes[i] = psychube;
+        undoPrefill.push(() => {
+          if (modalBuildState.chars[i] === character && modalBuildState.psychubes[i] === psychube) {
+            modalBuildState.psychubes[i] = '';
+          }
+        });
+      }
+    }
+    refreshBuildSlotsGrid();
+    const identifiedSlots = result.slots.filter((slot) => slot.character).length;
+    const identifiedPsychubes = result.slots.filter((slot) => slot.psychube).length;
+    const detectedBoss = result.mapName || '首领待手选';
+    note.textContent = `识别结果：${detectedBoss} · ${result.score ? Number(result.score).toLocaleString('zh-CN') + ' 分' : '积分待确认'} · ${identifiedSlots} 个角色 / ${identifiedPsychubes} 个心相。请核对表单，补填其余信息后提交。${compSuffix}`;
   });
 }
 
@@ -3660,7 +3818,7 @@ function openManeSubmitModal() {
       <div class="field">
         <label for="mProof">结算截图 *</label>
         <input id="mProof" name="proof" type="file" accept="image/png,image/jpeg,image/webp" required />
-        <span class="field-hint">支持 PNG / JPG / WebP，最大 5 MB。截图仅本人及审核管理员可见。</span>
+        <span class="field-hint">支持 PNG / JPG / WebP，最大 5 MB（超过 5 MB 时将自动压缩上传）。截图仅本人及审核管理员可见。</span>
         <span class="field-hint" id="mScreenshotStatus" role="status"></span>
         <div id="mProofPreview" class="proof-upload-preview" hidden></div>
       </div>
@@ -3689,17 +3847,14 @@ async function handleManeSubmit(form) {
   const fd = new FormData(form);
   const record = readManeFields(fd);
   const proof = fd.get('proof');
-  if (!proof?.size || !MIME_TO_EXT[proof.type] || proof.size > 5 * 1024 * 1024) {
-    throw new Error('请上传不超过 5 MB 的 PNG、JPG 或 WebP 截图。');
-  }
-  await decodeImageFile(proof);
+  const prepared = await getPreparedProofForForm(form, proof);
 
   const session = state.session || (await checked(sb.auth.signInAnonymously())).session;
   if (!session) throw new Error('建立投稿会话失败，请重试。');
   const player_id = session.user.id;
-  const path = `${player_id}/${uid()}.${MIME_TO_EXT[proof.type]}`;
+  const path = `${player_id}/${uid()}.${MIME_TO_EXT[prepared.mime]}`;
   const bucket = sb.storage.from('mane-proofs');
-  await checked(bucket.upload(path, proof, { contentType: proof.type }));
+  await checked(bucket.upload(path, prepared.uploadFile, { contentType: prepared.mime }));
   try {
     await checked(sb.rpc('submit_mane_result', {
       p_record: { ...record, evidence_path: path },
@@ -3758,73 +3913,84 @@ function bindFlashbackScreenshot(form) {
     undoPrefill = [];
     refreshBuildSlotsGrid();
     const file = proof.files[0];
-    renderUploadPreview(preview, file);
-    note.textContent = '';
-    if (!file?.size || !MIME_TO_EXT[file.type] || file.size > 5 * 1024 * 1024) return;
-    note.textContent = '正在识别通关截图…';
-    try {
-      const { recognizeFlashbackScreenshot } = await import('./flashback-screenshot.js?v=20261123-flash-proof');
-      const result = await recognizeFlashbackScreenshot(file);
-      if (!form.isConnected || current !== request) return;
-      if (!result) {
-        note.textContent = '暂未识别这张图的通关画面，请手动填写。';
-        return;
+    const outcome = await runScreenshotSelection({
+      form,
+      file,
+      preview,
+      note,
+      analyzingLabel: '识别通关截图',
+      recognizeFn: async (f) => {
+        const { recognizeFlashbackScreenshot } = await import('./flashback-screenshot.js?v=20261127-ocr-fix');
+        return recognizeFlashbackScreenshot(f);
       }
+    });
+    if (!outcome || !form.isConnected || current !== request) return;
 
-      const detectedStage = standardStages(version.value).find((entry) => entry.stage_no === result.stage);
-      if (detectedStage && !stageEdited) {
-        const previous = stage.value;
-        stage.value = detectedStage.id;
-        form.dataset.ocrStageNumber = String(detectedStage.stage_no);
-        undoPrefill.push(() => {
-          if (stageEdited) return;
-          delete form.dataset.ocrStageNumber;
-          if ([...stage.options].some((option) => option.value === previous)) stage.value = previous;
-          else stage.selectedIndex = 0;
-        });
-      }
-      if (result.rounds !== null && !roundsEdited) {
-        rounds.value = String(result.rounds);
-        undoPrefill.push(() => {
-          if (!roundsEdited) rounds.value = '';
-        });
-      }
+    const { ok, compSuffix } = applyScreenshotPrepOutcome(form, preview, note, file, outcome.prepOutcome);
+    if (!ok) return;
 
-      let filledChars = 0;
-      let filledPsychubes = 0;
-      for (const [slot, { character, psychube }] of result.slots.entries()) {
-        if (!character) continue;
-        const elsewhere = modalBuildState.chars.some((value) => splitSlotChoices(value).some(
-          (name) => canonicalCharacterKey(name) === canonicalCharacterKey(character)
-        ));
-        if (!modalBuildState.chars[slot] && !elsewhere) {
-          modalBuildState.chars[slot] = character;
-          filledChars++;
-          undoPrefill.push(() => {
-            if (modalBuildState.chars[slot] === character && !modalBuildState.carries[slot] &&
-                !modalBuildState.psychubes[slot] && !modalBuildState.resonanceCodes[slot]) {
-              modalBuildState.chars[slot] = '';
-            }
-          });
-        }
-        if (psychube && modalBuildState.chars[slot] === character && !modalBuildState.psychubes[slot]) {
-          modalBuildState.psychubes[slot] = psychube;
-          filledPsychubes++;
-          undoPrefill.push(() => {
-            if (modalBuildState.chars[slot] === character && modalBuildState.psychubes[slot] === psychube) {
-              modalBuildState.psychubes[slot] = '';
-            }
-          });
-        }
-      }
-      if (filledChars || filledPsychubes) refreshBuildSlotsGrid();
-      else saveSubmitDraftFromForm(form);
-      const stageLabel = detectedStage ? `第${detectedStage.stage_no}关` : '关卡待确认';
-      const roundLabel = result.rounds === null ? '回合待确认' : `${result.rounds} 回合`;
-      note.textContent = `识别结果：${stageLabel} · ${roundLabel}。已预填 ${filledChars} 个角色、${filledPsychubes} 个心相，请核对并补填其余信息。`;
-    } catch {
-      if (form.isConnected && current === request) note.textContent = '暂时无法识别这张截图，请手动填写。';
+    if (outcome.ocrOutcome.status === 'rejected') {
+      note.textContent = `暂时无法识别这张截图，请手动填写。${compSuffix}`;
+      return;
     }
+
+    const result = outcome.ocrOutcome.value;
+    if (!result) {
+      note.textContent = `暂未识别这张图的通关画面，请手动填写。${compSuffix}`;
+      return;
+    }
+
+    const detectedStage = standardStages(version.value).find((entry) => entry.stage_no === result.stage);
+    if (detectedStage && !stageEdited) {
+      const previous = stage.value;
+      stage.value = detectedStage.id;
+      form.dataset.ocrStageNumber = String(detectedStage.stage_no);
+      undoPrefill.push(() => {
+        if (stageEdited) return;
+        delete form.dataset.ocrStageNumber;
+        if ([...stage.options].some((option) => option.value === previous)) stage.value = previous;
+        else stage.selectedIndex = 0;
+      });
+    }
+    if (result.rounds !== null && !roundsEdited) {
+      rounds.value = String(result.rounds);
+      undoPrefill.push(() => {
+        if (!roundsEdited) rounds.value = '';
+      });
+    }
+
+    let filledChars = 0;
+    let filledPsychubes = 0;
+    for (const [slot, { character, psychube }] of result.slots.entries()) {
+      if (!character) continue;
+      const elsewhere = modalBuildState.chars.some((value) => splitSlotChoices(value).some(
+        (name) => canonicalCharacterKey(name) === canonicalCharacterKey(character)
+      ));
+      if (!modalBuildState.chars[slot] && !elsewhere) {
+        modalBuildState.chars[slot] = character;
+        filledChars++;
+        undoPrefill.push(() => {
+          if (modalBuildState.chars[slot] === character && !modalBuildState.carries[slot] &&
+              !modalBuildState.psychubes[slot] && !modalBuildState.resonanceCodes[slot]) {
+            modalBuildState.chars[slot] = '';
+          }
+        });
+      }
+      if (psychube && modalBuildState.chars[slot] === character && !modalBuildState.psychubes[slot]) {
+        modalBuildState.psychubes[slot] = psychube;
+        filledPsychubes++;
+        undoPrefill.push(() => {
+          if (modalBuildState.chars[slot] === character && modalBuildState.psychubes[slot] === psychube) {
+            modalBuildState.psychubes[slot] = '';
+          }
+        });
+      }
+    }
+    if (filledChars || filledPsychubes) refreshBuildSlotsGrid();
+    else saveSubmitDraftFromForm(form);
+    const stageLabel = detectedStage ? `第${detectedStage.stage_no}关` : '关卡待确认';
+    const roundLabel = result.rounds === null ? '回合待确认' : `${result.rounds} 回合`;
+    note.textContent = `识别结果：${stageLabel} · ${roundLabel}。已预填 ${filledChars} 个角色、${filledPsychubes} 个心相，请核对并补填其余信息。${compSuffix}`;
   });
 }
 
@@ -3878,7 +4044,7 @@ function openFbSubmitModal() {
       <div class="field">
         <label for="fbFormProof">通关截图 *</label>
         <input id="fbFormProof" name="proof" type="file" accept="image/png,image/jpeg,image/webp" required />
-        <span class="field-hint">PNG / JPG / WebP，最大 5 MB，仅本人及管理员可见。</span>
+        <span class="field-hint">PNG / JPG / WebP，最大 5 MB（超过 5 MB 时将自动压缩上传），仅本人及管理员可见。</span>
         <span class="field-hint" id="fbScreenshotStatus" role="status"></span>
         <div id="fbProofPreview" class="proof-upload-preview" hidden></div>
       </div>
@@ -3923,9 +4089,7 @@ async function handleFbSubmit(form) {
 
   if (nickname.length < 2 || nickname.length > 24) throw new Error('玩家昵称需在 2–24 个字符之间。');
   if (!/^[0-6]$/.test(roundValue)) throw new Error('请选择 0–6 之间的通关回合数。');
-  if (!file?.size || !MIME_TO_EXT[file.type] || file.size > 5 * 1024 * 1024) {
-    throw new Error('请上传不超过 5 MB 的 PNG、JPG 或 WebP 通关截图。');
-  }
+  const prepared = await getPreparedProofForForm(form, file);
   if (!state.fbStages.some((s) => s.id === stageId && s.version_id === versionId)) {
     throw new Error('所选版本与关卡不匹配。');
   }
@@ -3942,10 +4106,9 @@ async function handleFbSubmit(form) {
     const { matched_team, incumbent_rounds } = conflicts[0];
     throw new Error(`已有该队伍：${matched_team.join('、')}（${incumbent_rounds} 回合）。请减少回合，或调整阵容。`);
   }
-  await decodeImageFile(file);
 
-  const path = `${state.user.id}/${uid()}.${MIME_TO_EXT[file.type]}`;
-  await checked(sb.storage.from('proofs').upload(path, file, { contentType: file.type, upsert: false }));
+  const path = `${state.user.id}/${uid()}.${MIME_TO_EXT[prepared.mime]}`;
+  await checked(sb.storage.from('proofs').upload(path, prepared.uploadFile, { contentType: prepared.mime, upsert: false }));
   const payload = {
     stage_id: stageId,
     group_code,
