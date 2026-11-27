@@ -4895,22 +4895,60 @@ body[data-mode="flashback"] .row-quick-btn.is-active {
 }
 
 .card-trigger {
-  border: 1px solid var(--line-warm);
-  border-radius: var(--radius-xs);
-  background: rgba(16, 12, 10, 0.54);
-  color: var(--ivory);
+  position: relative;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-height: 28px;
+  padding: 4px 12px;
+  border: 1px solid rgba(244, 166, 114, 0.72);
+  border-radius: 3px;
+  background: linear-gradient(180deg, rgba(223, 105, 49, 0.34) 0%, rgba(162, 62, 34, 0.44) 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 228, 200, 0.28), 0 2px 6px rgba(0, 0, 0, 0.42);
+  color: #fff3e4;
   font-family: var(--font-serif);
-  font-size: 11px;
-  font-weight: 600;
-  padding: 3px 10px;
+  font-size: 11.5px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
   cursor: pointer;
-  transition: all 0.14s ease;
+  transition: transform 0.14s ease, background 0.14s ease, border-color 0.14s ease, color 0.14s ease, box-shadow 0.14s ease;
+}
+
+.card-trigger::after {
+  content: '›';
+  font-size: 1.15em;
+  line-height: 1;
+  opacity: 0.88;
 }
 
 .card-trigger:hover {
-  border-color: var(--paper-cream);
-  background: var(--paper-cream);
-  color: var(--paper-ink);
+  border-color: #f6b98b;
+  background: linear-gradient(180deg, #df6931 0%, #b53f24 100%);
+  color: #fffaf4;
+  box-shadow: inset 0 1px 0 rgba(255, 236, 214, 0.36), 0 4px 12px rgba(223, 105, 49, 0.34);
+  transform: translateY(-1px);
+}
+
+.card-trigger:active {
+  transform: translateY(0);
+}
+
+body[data-mode="flashback"] .card-trigger {
+  border-color: rgba(235, 198, 128, 0.72);
+  background: linear-gradient(180deg, rgba(229, 186, 115, 0.3) 0%, rgba(154, 114, 48, 0.42) 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 240, 204, 0.28), 0 2px 6px rgba(0, 0, 0, 0.42);
+  color: #fff6e0;
+}
+
+body[data-mode="flashback"] .card-trigger:hover {
+  border-color: #f4d28b;
+  background: linear-gradient(180deg, #e5ba73 0%, #c08e42 100%);
+  color: #19130a;
+  box-shadow: inset 0 1px 0 rgba(255, 248, 224, 0.42), 0 4px 12px rgba(229, 186, 115, 0.32);
 }
 
 /* ==================== 15. Official Commission Rating Ladder (modeled on game-mane-appraisal.png) ==================== */
@@ -7949,7 +7987,7 @@ body[data-mode="flashback"] .compare-side-card {
   .round-badge { font-size: 13px; padding: 2px 7px; }
   .round-badge small { font-size: 9.5px; }
   .row-actions { gap: 4px; }
-  .card-trigger { min-height: 21px; padding: 1px 7px; font-size: 9.5px; color: var(--ivory); }
+  .card-trigger { min-height: 28px; padding: 4px 11px; font-size: 11px; }
 
   /* Rating Ladder & Simulator Mobile Compact */
   .rating-ladder-section { padding: 10px; }

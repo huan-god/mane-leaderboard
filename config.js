@@ -4,7 +4,7 @@ window.LEADERBOARD_CONFIG = {
   supabaseAnonKey: 'sb_publishable_b3t-M_Vci6qbEgWOQW9B6g_WsCl_yPG',
   defaultLang: 'zh',
   offlineFirst: false,
-  assetVersion: '20261127-fast3',
+  assetVersion: '20261127-fast4',
   issueMeta: {
     version: '4.1',
     title: '亚特兰蒂斯谋杀案',
