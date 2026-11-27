@@ -2,10 +2,14 @@
 window.LEADERBOARD_CONFIG = {
   supabaseUrl: 'https://bnkqttkytjggtrnpjssn.supabase.co',
   supabaseAnonKey: 'sb_publishable_b3t-M_Vci6qbEgWOQW9B6g_WsCl_yPG',
+  defaultLang: 'auto',
+  offlineFirst: false,
   issueMeta: {
     version: '4.1',
     title: '亚特兰蒂斯谋杀案',
-    period: '11/05 – 12/10'
+    titleEn: 'Murder on Atlantis',
+    period: '11/05 – 12/10',
+    periodEn: 'Nov 5 – Dec 10'
   }
 };
 

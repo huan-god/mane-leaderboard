@@ -1,106 +1,124 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en" data-default-lang="auto">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#161210" />
-  <meta name="description" content="重返未来：1999 玩家社区榜单——融合「鬃毛邮报」调查积分榜与「焦点闪回」最短回合纪录，完整兼容社区投稿与审核体系。" />
-  <title>重返未来：1999 · 鬃毛邮报 &amp; 焦点闪回 玩家榜单</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%231b1411' stroke='%23df6931' stroke-width='3'/%3E%3Ctext x='32' y='43' text-anchor='middle' font-size='32' font-family='serif' fill='%23ede4d7'%3E%E9%82%AE%3C/text%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="./styles.css?v=20261127-ocr-fix" />
-  <link rel="stylesheet" href="./submission-progress.css?v=20261125-opt1" />
-  <script src="./config.js"></script>
-  <script type="module" src="./app.js?v=20261127-ocr-fix"></script>
+  <meta name="description" content="Reverse: 1999 global community leaderboard combining Mane's Bulletin high scores and Focused Flashback 0–6 round speedruns, with instant EN/ZH toggle and offline-first archive." />
+  <title>Reverse: 1999 · Mane's Bulletin &amp; Focused Flashback Leaderboard</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%231b1411' stroke='%23df6931' stroke-width='3'/%3E%3Ctext x='32' y='40' text-anchor='middle' font-size='24' font-family='Georgia,serif' font-weight='700' fill='%23ede4d7'%3EMB%3C/text%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="./styles.css?v=20261127-v2" />
+  <link rel="stylesheet" href="./submission-progress.css?v=20261127-v2" />
+  <script src="./config.js?v=20261127-v2"></script>
+  <script defer src="./app.bundle.js?v=20261127-v2"></script>
 </head>
-<body data-mode="mane">
-  <!-- 实机老报纸网点与纸纤维暗角底纹（参考 game-mane-survey.png / game-mane-atlantis.png） -->
+<body data-mode="mane" data-lang="en">
   <div class="arch-backdrop" aria-hidden="true"></div>
   <div class="halftone-layer" aria-hidden="true"></div>
   <div class="paper-grain" aria-hidden="true"></div>
 
   <header class="topbar" id="top">
     <div class="topbar-inner">
-      <a class="brand" href="#mane/scores" data-switch-mode="mane" aria-label="返回榜单首页">
+      <a class="brand" id="brandHomeLink" href="#mane/scores" data-switch-mode="mane" aria-label="Return to Leaderboard Home">
         <span class="brand-seal" aria-hidden="true">
           <span class="seal-ring"></span>
-          <span class="seal-glyph" id="brandGlyph">邮</span>
+          <span class="seal-glyph" id="brandGlyph">MB</span>
         </span>
         <span class="brand-copy">
-          <strong id="brandTitle">鬃毛邮报 · 调查总榜</strong>
-          <small>REVERSE: 1999 · COMMUNITY ARCHIVE</small>
+          <strong id="brandTitle">Mane's Bulletin · Global Archive</strong>
+          <small id="brandSub">REVERSE: 1999 · COMMUNITY LEADERBOARD</small>
         </span>
       </a>
 
-      <!-- 官方细铜框双模式切换（保留 ▷▶○× 装饰角标） -->
-      <div class="mode-switcher" role="tablist" aria-label="榜单模式切换">
+      <div class="mode-switcher" id="modeSwitcher" role="tablist" aria-label="Switch Leaderboard Mode">
         <span class="frame-glyphs left" aria-hidden="true">▷▶○×</span>
-        <button class="mode-tab active" role="tab" aria-selected="true" data-mode-switch="mane">
-          <span class="mode-cn">鬃毛邮报</span>
+        <button type="button" class="mode-tab active" role="tab" aria-selected="true" data-mode-switch="mane">
+          <span class="mode-cn" id="modeManeLabel">Mane's Bulletin</span>
           <span class="mode-en">MANE’S BULLETIN</span>
         </button>
-        <button class="mode-tab" role="tab" aria-selected="false" data-mode-switch="flashback">
-          <span class="mode-cn">焦点闪回</span>
+        <button type="button" class="mode-tab" role="tab" aria-selected="false" data-mode-switch="flashback">
+          <span class="mode-cn" id="modeFbLabel">Focused Flashback</span>
           <span class="mode-en">FLASHBACK</span>
         </button>
         <span class="frame-glyphs right" aria-hidden="true">1999</span>
       </div>
 
       <div class="top-actions">
-        <span id="connectionBadge" class="status-pill" aria-live="polite">
-          <span class="status-dot"></span>
-          <span id="connectionText">连接档案库…</span>
-        </span>
-        <button id="adminCenterBtn" class="ghost-btn" hidden><span class="acc-full">管理后台</span><span class="acc-short">后台</span></button>
-        <button type="button" class="ghost-btn" data-action="my-submissions"><span class="acc-full">我的投稿</span><span class="acc-short">进度</span></button>
-        <button id="accountBtn" class="ghost-btn"><span class="acc-full">管理员登录</span><span class="acc-short">登录</span></button>
-        <button id="submitBtn" class="action-cta-btn" disabled>
-          <span class="cta-main">＋ 投稿<span class="cta-ext">成绩</span></span>
-          <span class="cta-sub" aria-hidden="true">SUBMIT ▽▽</span>
+        <div class="lang-switch" role="group" aria-label="Language">
+          <button type="button" class="lang-btn active" data-set-lang="en" aria-pressed="true">EN</button>
+          <button type="button" class="lang-btn" data-set-lang="zh" aria-pressed="false">中文</button>
+        </div>
+        <button type="button" id="adminCenterBtn" class="ghost-btn" hidden>
+          <span class="acc-full">Admin Panel</span><span class="acc-short">Admin</span>
+        </button>
+        <button type="button" id="mySubmissionsBtn" class="ghost-btn" data-action="my-submissions">
+          <span class="acc-full">My Submissions</span><span class="acc-short">Mine</span>
+        </button>
+        <button type="button" id="accountBtn" class="ghost-btn">
+          <span class="acc-full">Admin Sign In</span><span class="acc-short">Sign In</span>
+        </button>
+        <button type="button" id="submitBtn" class="action-cta-btn">
+          <span class="cta-main" id="submitBtnMain">+ Submit<span class="cta-ext"> Record</span></span>
+          <span class="cta-sub" id="submitBtnSub" aria-hidden="true">REPORT ▽▽</span>
         </button>
       </div>
     </div>
 
-    <!-- 次级导航条 -->
-    <nav class="subnav-bar" aria-label="榜单视图导航">
-      <div class="subnav-inner" id="subnav"></div>
+    <nav class="subnav-bar" id="subnavBar" aria-label="Leaderboard Views">
+      <div class="subnav-inner" id="subnav">
+        <div class="subnav-tabs" id="subnavTabs"></div>
+        <div class="subnav-right" id="subnavRight">
+          <span class="subnav-meta" id="subnavMeta">MANE'S BULLETIN · INVESTIGATION SCORE</span>
+          <span id="connectionBadge" class="status-pill is-offline-archive" aria-live="polite">
+            <span class="status-dot"></span>
+            <span id="connectionText">Offline Archive · v4.1</span>
+          </span>
+          <button type="button" id="syncLiveBtn" class="sync-live-btn" data-action="sync-live">Sync Live ↻</button>
+        </div>
+      </div>
     </nav>
   </header>
 
   <main class="shell">
-    <!-- 紧凑报头 Masthead（整合版本期次与全站统计，桌面首屏直达前三名） -->
-    <section class="masthead" id="masthead" aria-live="polite"></section>
+    <div class="uttu-shell-frame">
+      <span class="frame-corner tl" aria-hidden="true"></span>
+      <span class="frame-corner tr" aria-hidden="true"></span>
+      <span class="frame-corner bl" aria-hidden="true"></span>
+      <span class="frame-corner br" aria-hidden="true"></span>
 
-    <!-- 全局提示栏（仅在离线/报错时显示） -->
-    <div id="globalNotice" class="global-notice" role="status" hidden></div>
+      <section class="masthead" id="masthead" aria-live="polite"></section>
 
-    <!-- 核心榜单工作区 -->
-    <div id="workspace" class="workspace"></div>
+      <div id="globalNotice" class="global-notice" role="status" hidden></div>
+
+      <div id="workspace" class="workspace"></div>
+    </div>
   </main>
 
-  <footer class="site-footer">
+  <footer class="site-footer" id="siteFooter">
     <div class="footer-inner">
       <div class="footer-col">
         <div class="footer-brand">
-          <strong>REVERSE: 1999 · 玩家社区榜单</strong>
-          <span>鬃毛邮报调查积分榜 × 焦点闪回最短回合榜</span>
+          <strong>REVERSE: 1999 · GLOBAL COMMUNITY LEADERBOARD</strong>
+          <span>Mane's Bulletin High Scores × Focused Flashback Speedruns</span>
         </div>
         <p class="footer-credits">
-          社区榜单站长：幻化凌风（<a href="https://space.bilibili.com/266889606" target="_blank" rel="noopener noreferrer">哔哩哔哩主页 ↗</a>）·
-          管理员：寻屿、莳雨枫椛、偶尔出现的神秘猫猫头、椋-喵
+          Curator: <span class="is-player-name">幻化凌风</span> (<a href="https://space.bilibili.com/266889606" target="_blank" rel="noopener noreferrer">Bilibili ↗</a>) ·
+          Moderators: <span class="is-player-name">寻屿</span>, <span class="is-player-name">莳雨枫椛</span>, <span class="is-player-name">偶尔出现的神秘猫猫头</span>, <span class="is-player-name">椋-喵</span>
         </p>
       </div>
       <div class="footer-col footer-links">
         <div class="footer-ref-links">
-          <a href="https://res1999.huijiwiki.com/wiki/%E9%AC%83%E6%AF%9B%E9%82%AE%E6%8A%A5" target="_blank" rel="noopener noreferrer">灰机 Wiki · 鬃毛邮报 ↗</a>
-          <a href="https://res1999.huijiwiki.com/wiki/%E7%84%A6%E7%82%B9%E9%97%AA%E5%9B%9E" target="_blank" rel="noopener noreferrer">灰机 Wiki · 焦点闪回 ↗</a>
+          <a href="https://reverse1999.fandom.com/wiki/Mane%27s_Bulletin" target="_blank" rel="noopener noreferrer">Reverse: 1999 Wiki · Mane's Bulletin ↗</a>
+          <a href="https://reverse1999.fandom.com/wiki/Focused_Flashback" target="_blank" rel="noopener noreferrer">Reverse: 1999 Wiki · Focused Flashback ↗</a>
         </div>
         <p class="footer-disclaimer">
-          本网站为非官方玩家共建社区项目，与游戏发行方无隶属关系。请勿在成绩截图中暴露个人敏感信息。
+          Unofficial fan-run community archive, not affiliated with Bluepoch. Please avoid exposing private account credentials in screenshots.
         </p>
       </div>
     </div>
   </footer>
 
+  <div id="glossaryPopoverRoot"></div>
   <div id="modalRoot"></div>
   <div id="charPickerRoot"></div>
   <div id="psyPickerRoot"></div>

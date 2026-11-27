@@ -1,36 +1,86 @@
 import {
+  cleanStageDisplayName,
+  formatBossCount,
+  formatCompactScore,
+  formatDateTime,
+  formatEntries,
+  formatMonthDay,
+  formatMonthDayTime,
+  formatRounds,
+  formatScore,
+  getLang,
+  initLang,
+  isEn,
+  localizeAfflatus,
+  localizeDivision,
+  localizeDivisionShort,
+  localizeIssueMeta,
+  localizeSection,
+  localizeStageName,
+  localizeStatus,
+  localizeVersionLabel,
+  setLang,
+  t
+} from './i18n.js';
+import {
   AFFLATUS_META,
+  ARC_ROLE_LABELS,
   CHARACTER_LIST,
+  WILDCARD_CHOICES,
   afflatusSvg,
   canonicalCharacterKey,
   canonicalDisplayName,
+  canonicalWildcard,
   characterMatchesQuery,
   characterMonogram,
+  detectTeamArchetypes,
+  displayBossName,
+  displayBossSubtitle,
+  displayBossTags,
+  displayCarryNames,
+  displayCharacterName,
+  displayWildcard,
   extractLineupCharacterNames,
+  formatFlexSlot,
+  formatWildSlot,
+  getArcanistDetail,
   insightWatermarkSvg,
+  isWildcardChoice,
   parseLineupSlots,
   rarityOverlaySrc,
   resolveAfflatus,
   resolveBossAsset,
+  resolveBossWikiUrl,
   resolveCharacter,
+  resolveFlashbackStageArt,
   resolveManeGrade,
   toRoman
-} from './arcanists.js?v=20261125-opt1';
+} from './arcanists.js';
 import {
+  getBossThresholdProgress,
   resolveFlashbackStageMechanics,
   resolveManeBossMechanics
 } from './boss-mechanics.js';
 import {
   PSYCHUBES,
-  PSYCHUBE_TAGS,
+  PSYCHUBE_TAGS_META,
+  displayPsychubeName,
+  displayPsychubeStat,
+  displayPsychubeTag,
+  getPsychubeDetail,
   psychubeFrameSrc,
   psychubeIconSrc,
+  psychubeMatchesQuery,
   resolvePsychube
 } from './psychubes.js';
 import {
+  STATUS_CATEGORY_META,
+  lookupStatusTerm
+} from './data/status-glossary.js';
+import {
   adminContact,
   bindModerationFilters,
-  contactField,
+  contactFieldHtml,
   filterModerationRows,
   moderationFilterFields,
   moderationPager,
@@ -39,44 +89,37 @@ import {
   showRejectionForm
 } from './submission-progress.js';
 import { canonicalTeam, validateLineup } from './flashback-logic.mjs';
-import {beijingDayRange, beijingTime, exportManeWorkbook, rankManeCarryTotals, shiftBeijingDay, todayInBeijing} from './mane-reports.js?v=20261125-opt1';
+import {
+  beijingDayRange,
+  beijingTime,
+  exportManeWorkbook,
+  filterOfflineDailyRows,
+  formatApprovedTime,
+  latestOfflineDailyDate,
+  rankManeCarryTotals,
+  shiftBeijingDay,
+  todayInBeijing
+} from './mane-reports.js';
+import { OFFLINE_SNAPSHOT } from './data/offline-snapshot.js';
+import { recognizeManeScreenshot } from './mane-screenshot.js';
+import { recognizeFlashbackScreenshot } from './flashback-screenshot.js';
 
 const $ = (sel) => document.querySelector(sel);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (ch) =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]
 );
+const L = (en, zh, lang = getLang()) => (isEn(lang) ? en : zh);
 
 const FILTER_AFFLATUS = ['beast', 'plant', 'star', 'mineral', 'spirit', 'intellect'];
-
-const MANE_SECTIONS = {
-  new: '鉴藏者特版',
-  rerun: '怪相档案'
-};
-
-const DIVISIONS = {
-  zero: '全 0 塑造',
-  max: '全满塑造'
-};
-
-const STATUS_LABELS = {
-  pending: '待审核',
-  approved: '已通过',
-  rejected: '已拒绝',
-  removed: '已移除'
-};
-
-const FB_ADMIN_TABS = {
-  pending: '待审核',
-  approved: '已通过',
-  rejected: '已拒绝',
-  removed: '已移除',
-  historical: '历史档案'
-};
+const DIVISION_KEYS = ['zero', 'max'];
+const SECTION_KEYS = ['new', 'rerun'];
+const ADMIN_STATUS_KEYS = ['pending', 'approved', 'rejected', 'removed'];
+const FB_ADMIN_TAB_KEYS = ['pending', 'approved', 'rejected', 'removed', 'historical'];
 
 const FB_ARCHIVE_ACTIONS = {
-  'fb-archive-record': { label: '这条成绩', rpc: 'archive_submission', arg: 'p_submission_id' },
-  'fb-archive-history': { label: '这条档案', rpc: 'archive_historical_record', arg: 'p_record_id' },
-  'fb-archive-version': { label: '这个版本及其榜单', rpc: 'archive_version', arg: 'p_version_id' }
+  'fb-archive-record': { en: 'this record', zh: '这条成绩', rpc: 'archive_submission', arg: 'p_submission_id' },
+  'fb-archive-history': { en: 'this archive entry', zh: '这条档案', rpc: 'archive_historical_record', arg: 'p_record_id' },
+  'fb-archive-version': { en: 'this cycle and its boards', zh: '这个版本及其榜单', rpc: 'archive_version', arg: 'p_version_id' }
 };
 
 const MIME_TO_EXT = {
@@ -110,12 +153,12 @@ function canvasToBlobAsync(canvas, mime, quality) {
   return new Promise((resolve) => canvas.toBlob(resolve, mime, quality));
 }
 
-async function prepareProofForUpload(file) {
-  if (!file || !file.size) throw new Error('请上传结算截图。');
+async function prepareProofForUpload(file, lang = getLang()) {
+  if (!file || !file.size) throw new Error(t('errProofRequired', {}, lang));
   const mime = resolveProofMime(file);
-  if (!mime) throw new Error('仅支持 PNG、JPG 或 WebP 格式截图。');
+  if (!mime) throw new Error(t('errProofType', {}, lang));
   if (file.size > MAX_PROOF_RAW_BYTES) {
-    throw new Error('截图文件超过 30 MB 上限，请先裁剪或压缩后再上传。');
+    throw new Error(L('Screenshot file exceeds 30 MB limit. Please trim or resize it first.', '截图文件超过 30 MB 上限，请先裁剪或压缩后再上传。', lang));
   }
   const img = await decodeImageFile(file);
   if (file.size <= MAX_PROOF_UPLOAD_BYTES) {
@@ -145,7 +188,7 @@ async function prepareProofForUpload(file) {
   const natH = img.naturalHeight;
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('截图文件大小不能超过 5 MB。');
+  if (!ctx) throw new Error(t('errProofSize', {}, lang));
 
   for (const maxEdge of maxEdges) {
     const scale = Math.min(1, maxEdge / Math.max(natW, natH));
@@ -168,22 +211,10 @@ async function prepareProofForUpload(file) {
       }
     }
   }
-  throw new Error('截图自动压缩后仍超过 5 MB，请先适当裁剪分辨率后再上传。');
+  throw new Error(t('errProofSize', {}, lang));
 }
 
-async function getPreparedProofForForm(form, file) {
-  if (!file || !file.size) throw new Error('请上传不超过 5 MB 的 PNG、JPG 或 WebP 截图。');
-  if (form._preparedProof?.sourceFile === file) return form._preparedProof;
-  if (form._preparedProofPromise?.sourceFile === file) {
-    const resolved = { sourceFile: file, ...(await form._preparedProofPromise.promise) };
-    form._preparedProof = resolved;
-    return resolved;
-  }
-  const resolved = { sourceFile: file, ...(await prepareProofForUpload(file)) };
-  form._preparedProof = resolved;
-  return resolved;
-}
-
+const OFFLINE_SUBMISSIONS_KEY = 'r1999-offline-submissions-v1';
 const DEFAULT_MODE = location.pathname.toLowerCase().includes('flashback') ? 'flashback' : 'mane';
 
 const state = {
@@ -192,53 +223,63 @@ const state = {
   maneDaily: { date: '', division: '', map: '' },
   fbPage: 'leaderboard',  // 'leaderboard' | 'carries' | 'players' | 'rules'
 
-  connected: false,
-  loading: true,
+  dataSource: 'offline',  // 'offline' | 'live'
+  connected: true,
+  loading: false,
+  syncingLive: false,
   errorNotice: '',
 
-  // 共享身份状态
+  // Auth & Profile
   session: null,
   user: null,
   profile: null,
   isAdmin: false,
 
-  // 鬃毛邮报状态
+  // Mane's Bulletin state
   maneSection: 'new',
   maneDivision: 'zero',
   maneMapId: '',
   maneRoleMode: 'carry',  // 'carry' | 'member'
   maneCarry: '',          // canonicalCharacterKey
-  maneAfflatus: '',       // '' | 'beast'|'plant'|'star'|'mineral'|'spirit'|'intellect'
+  maneAfflatus: '',
   maneQuery: '',
   manePlayerScope: 'all', // 'all' | 'new' | 'rerun'
   manePlayerDiv: 'all',   // 'all' | 'zero' | 'max'
   maneMaps: [],
   maneScores: [],
   maneTotals: [],
+  maneDailyScores: [],
 
-  // 焦点闪回状态
+  // Focused Flashback state
   fbVersionId: '',
   fbStageId: '',
   fbGroup: 'zero',
   fbResonanceOnly: false,
   fbRoleMode: 'carry',    // 'carry' | 'member'
-  fbCarry: '',            // canonicalCharacterKey
-  fbAfflatus: '',         // '' | 'beast'|...
+  fbCarry: '',
+  fbAfflatus: '',
   fbQuery: '',
   fbCarryScope: 'period',
   fbCarryMetric: 'appearance_count',
   fbVersions: [],
   fbStages: [],
   fbRecords: [],
+  fbApprovedRecords: [],
   fbPlayers: [],
   fbArchives: [],
   fbCarries: [],
 
-  // 直达定位高亮、机制档案与移动端筛选抽屉状态
+  // Highlight, Mechanics drawers, Mobile filter drawer & V2 Interactive State
   highlightRecordId: '',
   maneMechOpen: false,
   fbMechOpen: false,
-  mobileFilterOpen: false
+  mobileFilterOpen: false,
+  intelCollapsed: false,
+  maneSelectedAppraisal: -1,
+  psyAmpLevel: 5,
+  activePsyDossierId: '',
+  posterTheme: 'parchment',
+  glossaryOpen: null
 };
 
 let sb = null;
@@ -248,7 +289,7 @@ let startingGuest = false;
 let pendingScrollRecordId = '';
 const posterIndex = new Map();
 
-// 投稿 / 编辑弹窗中 1–4 号位统一阵容、主 C、心相与共鸣码状态
+// Unified 1–4 Slot Build State for Submit / Edit Modals
 const modalBuildState = {
   chars: ['', '', '', ''],
   carries: [false, false, false, false],
@@ -265,11 +306,6 @@ const charPickerState = {
   choices: []
 };
 
-const ANY_SLOT_CHOICES = ['任意生存', '任意角色', '任意拐位'];
-const isAnySlotChoice = (name) => ANY_SLOT_CHOICES.includes(name);
-const splitSlotChoices = (value) => String(value || '').split(/[/／]/).map((name) => name.trim()).filter(Boolean);
-const canMarkSlotCarry = (name) => Boolean(name) && !isAnySlotChoice(name) && splitSlotChoices(name).length === 1;
-
 const psyPickerState = {
   open: false,
   slotIndex: 0,
@@ -278,6 +314,28 @@ const psyPickerState = {
   tag: '全部',
   query: ''
 };
+
+const isAnySlotChoice = (name) => isWildcardChoice(name);
+const splitSlotChoices = (value) => String(value || '').split(/[/／]/).map((name) => name.trim()).filter(Boolean);
+const canMarkSlotCarry = (name) => Boolean(name) && !isAnySlotChoice(name) && splitSlotChoices(name).length === 1;
+
+function divisionLabelsMap(lang = getLang()) {
+  return {
+    zero: localizeDivision('zero', lang),
+    max: localizeDivision('max', lang)
+  };
+}
+
+function sectionLabelsMap(lang = getLang()) {
+  return {
+    new: localizeSection('new', lang),
+    rerun: localizeSection('rerun', lang)
+  };
+}
+
+function resonanceBadgeHtml(lang = getLang()) {
+  return `<span class="resonance-tag">✦ ${esc(t('res10FullBadge', {}, lang))}</span>`;
+}
 
 function normalizeStringSlots(value) {
   if (!value) return [];
@@ -301,6 +359,21 @@ function extractRecordBuilds(record) {
   return { psychubes, resonanceCodes };
 }
 
+function localRecordBadgeHtml(record, lang = getLang()) {
+  if (!record?.isLocal) return '';
+  return `<span class="local-record-tag">✦ ${esc(t('localRecordTag', {}, lang))}</span>`;
+}
+
+function canonicalStoredSlotChoice(rawName) {
+  const trimmed = String(rawName ?? '').trim();
+  if (!trimmed) return '';
+  const wc = canonicalWildcard(trimmed);
+  if (wc) return wc;
+  const resolved = resolveCharacter(trimmed);
+  if (resolved) return resolved.name;
+  return trimmed;
+}
+
 function resetModalBuildState(team = [], carryStr = '', psychubes = [], resonanceCodes = []) {
   const tArr = Array.isArray(team) ? team : splitTeam(team);
   const carryKeys = new Set(splitCarries(carryStr).map(canonicalCharacterKey));
@@ -309,7 +382,7 @@ function resetModalBuildState(team = [], carryStr = '', psychubes = [], resonanc
   for (let i = 0; i < 4; i++) {
     const rawChar = String(tArr[i] ?? '').trim();
     const choices = splitSlotChoices(rawChar);
-    const slot = choices.map((name) => isAnySlotChoice(name) ? name : (resolveCharacter(name)?.name || name)).join('/');
+    const slot = choices.map(canonicalStoredSlotChoice).filter(Boolean).join('/');
     modalBuildState.chars[i] = slot;
     modalBuildState.carries[i] = canMarkSlotCarry(slot) && carryKeys.has(canonicalCharacterKey(slot));
     modalBuildState.psychubes[i] = pArr[i] || '';
@@ -318,6 +391,7 @@ function resetModalBuildState(team = [], carryStr = '', psychubes = [], resonanc
 }
 
 function readTeamBuilderSubmission() {
+  const lang = getLang();
   const team = [];
   const carries = [];
   const psychubes = [];
@@ -330,17 +404,19 @@ function readTeamBuilderSubmission() {
     const res = String(modalBuildState.resonanceCodes[i] || '').trim();
     if (!rawChar) {
       if (psy || res) {
-        throw new Error(`第 ${i + 1} 号位尚未选择角色，请先点击选择角色，或清空该号位的心相与共鸣码。`);
+        throw new Error(t('errSlotMissingChar', { n: i + 1 }, lang));
       }
       continue;
     }
-    if (Array.from(rawChar).length > 40) throw new Error('每个位置的角色名称合计最多 40 字。');
+    if (Array.from(rawChar).length > 40) throw new Error(t('errSlotNameTooLong', {}, lang));
     for (const name of splitSlotChoices(rawChar)) {
       const key = canonicalCharacterKey(name);
-      if (seenKeys.has(key)) throw new Error(`上阵阵容中包含重复项「${name}」，请移除重复项。`);
+      if (seenKeys.has(key)) {
+        throw new Error(t('errDuplicateMember', { name: displayCharacterName(name, lang) }, lang));
+      }
       seenKeys.add(key);
     }
-    if (res.length > 160) throw new Error('单个角色的共鸣码长度不能超过 160 个字符。');
+    if (res.length > 160) throw new Error(t('errResTooLong', {}, lang));
     team.push(rawChar);
     if (modalBuildState.carries[i] && canMarkSlotCarry(rawChar)) carries.push(rawChar);
     psychubes.push(psy);
@@ -348,10 +424,10 @@ function readTeamBuilderSubmission() {
   }
 
   if (team.length < 1 || team.length > 4) {
-    throw new Error('请至少点击选框填入 1 名（最多 4 名）上阵角色。');
+    throw new Error(t('errTeamCount', {}, lang));
   }
   if (!carries.length) {
-    throw new Error('请勾选至少 1 名角色作为「主 C」（多核心可同时勾选多位）。');
+    throw new Error(t('errCarryRequired', {}, lang));
   }
   const hasPsychubes = psychubes.some(Boolean);
   const hasResonance = resonanceCodes.some(Boolean);
@@ -372,58 +448,292 @@ function isMissingBuildColumnError(err) {
   return /team_psychubes|team_resonance_codes|42703|PGRST204|schema cache/i.test(msg);
 }
 
-function renderPsychubeThumbHtml(rawPsy, sizeClass = '') {
+/* ==================== Offline Local Submission Sandbox Persistence ==================== */
+function loadOfflineSubmissions() {
+  try {
+    const raw = localStorage.getItem(OFFLINE_SUBMISSIONS_KEY);
+    if (!raw) return { mane: [], flashback: [] };
+    const parsed = JSON.parse(raw);
+    return {
+      mane: Array.isArray(parsed?.mane) ? parsed.mane : [],
+      flashback: Array.isArray(parsed?.flashback) ? parsed.flashback : []
+    };
+  } catch {
+    return { mane: [], flashback: [] };
+  }
+}
+
+function saveOfflineSubmissions(store) {
+  try {
+    localStorage.setItem(OFFLINE_SUBMISSIONS_KEY, JSON.stringify({
+      mane: Array.isArray(store?.mane) ? store.mane : [],
+      flashback: Array.isArray(store?.flashback) ? store.flashback : []
+    }));
+  } catch {}
+}
+
+function clearOfflineSubmissions(board = 'all') {
+  const store = loadOfflineSubmissions();
+  if (board === 'mane') store.mane = [];
+  else if (board === 'flashback') store.flashback = [];
+  else {
+    store.mane = [];
+    store.flashback = [];
+  }
+  saveOfflineSubmissions(store);
+}
+
+function cloneSnapshotList(list) {
+  return Array.isArray(list) ? list.map((item) => ({ ...item })) : [];
+}
+
+function mergeManeTotalsWithLocal(baseTotals, localManeRows, mapById) {
+  // Deep copy base totals map_scores so mutations never pollute OFFLINE_SNAPSHOT
+  const cloned = (baseTotals || []).map((row) => ({
+    ...row,
+    map_scores: Array.isArray(row.map_scores) ? row.map_scores.map((m) => ({ ...m })) : []
+  }));
+  if (!localManeRows.length) return cloned;
+
+  for (const rec of localManeRows) {
+    const map = mapById.get(rec.map_id);
+    if (!map) continue;
+    const section = map.section || 'new';
+    const edition = section === 'new' ? (map.edition || '') : '';
+    const division = rec.division;
+    const recScore = BigInt(rec.score || 0);
+
+    for (const rawCarry of splitCarries(rec.carry)) {
+      const carryKey = canonicalCharacterKey(rawCarry);
+      const carryCanon = canonicalDisplayName(rawCarry);
+      let bucket = cloned.find((r) =>
+        r.section === section &&
+        r.edition === edition &&
+        r.division === division &&
+        canonicalCharacterKey(r.carry_name) === carryKey
+      );
+      if (!bucket) {
+        bucket = {
+          section,
+          edition,
+          division,
+          carry_key: carryCanon,
+          carry_name: carryCanon,
+          total_score: '0',
+          map_count: 0,
+          map_scores: []
+        };
+        cloned.push(bucket);
+      }
+      const existingIdx = bucket.map_scores.findIndex((m) => m.map_id === map.id);
+      const mapEntry = {
+        name: map.name,
+        team: [...(rec.team || [])],
+        score: String(recScore),
+        map_id: map.id,
+        player: rec.display_name
+      };
+      if (existingIdx >= 0) {
+        if (recScore > BigInt(bucket.map_scores[existingIdx].score || 0)) {
+          bucket.map_scores[existingIdx] = mapEntry;
+        }
+      } else {
+        bucket.map_scores.push(mapEntry);
+      }
+      bucket.map_count = bucket.map_scores.length;
+      bucket.total_score = String(
+        bucket.map_scores.reduce((sum, m) => sum + BigInt(m.score || 0), 0n)
+      );
+    }
+  }
+  return cloned;
+}
+
+function hydrateFromOfflineSnapshot() {
+  const snap = OFFLINE_SNAPSHOT || {};
+  const localStore = loadOfflineSubmissions();
+  const localMane = localStore.mane.map((r) => ({ ...r, isLocal: true }));
+  const localFb = localStore.flashback.map((r) => ({ ...r, isLocal: true }));
+
+  const maneMaps = cloneSnapshotList(snap.maneMaps).sort((a, b) =>
+    String(b.edition).localeCompare(String(a.edition), 'en', { numeric: true }) ||
+    (a.position - b.position) ||
+    String(a.name).localeCompare(String(b.name), 'zh-CN')
+  );
+  const mapById = new Map(maneMaps.map((m) => [m.id, m]));
+
+  // Merge Mane scores (deduplicate by map_id + division + canonicalTeam)
+  const maneByLineup = new Map();
+  const allManeCandidates = [...cloneSnapshotList(snap.maneScores), ...localMane];
+  for (const row of allManeCandidates) {
+    const teamKey = canonicalTeam((row.team || []).map(canonicalCharacterKey));
+    const key = `${row.map_id}::${row.division}::${teamKey}`;
+    const prev = maneByLineup.get(key);
+    if (!prev || compareManeScore(row, prev) < 0) {
+      maneByLineup.set(key, row);
+    }
+  }
+  const maneScores = [...maneByLineup.values()];
+  const maneDailyScores = [
+    ...localMane.map((r) => ({ ...r, approved_at: r.approved_at || r.created_at })),
+    ...cloneSnapshotList(snap.maneDailyScores)
+  ];
+  const maneTotals = mergeManeTotalsWithLocal(snap.maneTotals, localMane, mapById);
+
+  // Merge Flashback versions, stages, records
+  const fbVersions = cloneSnapshotList(snap.fbVersions).sort((a, b) =>
+    String(b.code).localeCompare(String(a.code), 'en', { numeric: true }) ||
+    (Date.parse(b.created_at) - Date.parse(a.created_at))
+  );
+  const fbStages = cloneSnapshotList(snap.fbStages);
+  const stageById = new Map(fbStages.map((s) => [s.id, s]));
+
+  const fbByLineup = new Map();
+  const allFbCandidates = [...cloneSnapshotList(snap.fbRecords), ...localFb];
+  for (const row of allFbCandidates) {
+    const teamKey = row.team_key || canonicalTeam(row.team || []);
+    const key = `${row.stage_id}::${row.group_code}::${teamKey}`;
+    const prev = fbByLineup.get(key);
+    if (!prev || compareFlashbackRecord(row, prev) < 0) {
+      fbByLineup.set(key, row);
+    }
+  }
+  const fbRecords = [...fbByLineup.values()];
+
+  // Merge local Flashback players & carries cleanly
+  const fbPlayers = cloneSnapshotList(snap.fbPlayers);
+  const fbCarries = cloneSnapshotList(snap.fbCarries);
+  if (localFb.length) {
+    const localWinners = fbRecords.filter((r) => r.isLocal);
+    for (const rec of localWinners) {
+      const verId = rec.version_id || stageById.get(rec.stage_id)?.version_id || null;
+      const pId = rec.player_id || `local-player:${normKey(rec.display_name)}`;
+      for (const scopeVer of [null, verId]) {
+        const hit = fbPlayers.find((p) => p.version_id === scopeVer && (p.player_id === pId || normKey(p.display_name) === normKey(rec.display_name)));
+        if (hit) hit.appearance_count = Number(hit.appearance_count || 0) + 1;
+        else fbPlayers.push({ version_id: scopeVer, player_id: pId, display_name: rec.display_name, appearance_count: 1 });
+      }
+      for (const rawCarry of splitCarries(rec.carry_name)) {
+        const cKey = canonicalCharacterKey(rawCarry);
+        const cName = canonicalDisplayName(rawCarry);
+        for (const scopeVer of [null, verId]) {
+          const hit = fbCarries.find((c) => c.version_id === scopeVer && canonicalCharacterKey(c.carry_name) === cKey);
+          if (!hit) {
+            fbCarries.push({ version_id: scopeVer, carry_name: cName, challenge_count: 1 });
+          } else {
+            const challengeSet = new Set(
+              fbRecords
+                .filter((r) => (!scopeVer || r.version_id === scopeVer) && splitCarries(r.carry_name).some((cn) => canonicalCharacterKey(cn) === cKey))
+                .map((r) => stageById.get(r.stage_id)?.challenge_id || r.stage_id)
+            );
+            hit.challenge_count = Math.max(Number(hit.challenge_count || 0), challengeSet.size);
+          }
+        }
+      }
+    }
+  }
+
+  state.maneMaps = maneMaps;
+  state.maneScores = maneScores;
+  state.maneTotals = maneTotals;
+  state.maneDailyScores = maneDailyScores;
+  state.fbVersions = fbVersions;
+  state.fbStages = fbStages;
+  state.fbRecords = fbRecords;
+  state.fbApprovedRecords = [...cloneSnapshotList(snap.fbApprovedRecords || snap.fbRecords), ...localFb];
+  state.fbPlayers = fbPlayers;
+  state.fbCarries = fbCarries;
+  state.fbArchives = cloneSnapshotList(snap.fbArchives);
+
+  syncActiveSelectionsAfterLoad();
+  state.dataSource = 'offline';
+  state.connected = true;
+  state.loading = false;
+  state.errorNotice = '';
+}
+
+function syncActiveSelectionsAfterLoad() {
+  if (state.maneMapId) {
+    const matchedMap = state.maneMaps.find((m) => m.id === state.maneMapId);
+    if (matchedMap && matchedMap.section !== state.maneSection) {
+      state.maneSection = matchedMap.section;
+    }
+  }
+  const maps = activeManeMaps();
+  if (!maps.some((m) => m.id === state.maneMapId)) state.maneMapId = maps[0]?.id || '';
+
+  if (state.fbStageId) {
+    const matchedStage = state.fbStages.find((s) => s.id === state.fbStageId);
+    if (matchedStage && matchedStage.version_id !== state.fbVersionId) {
+      state.fbVersionId = matchedStage.version_id;
+    }
+  }
+  if (!state.fbVersions.some((v) => v.id === state.fbVersionId)) {
+    state.fbVersionId = state.fbVersions[0]?.id || '';
+  }
+  const stages = standardStages(state.fbVersionId);
+  if (!stages.some((s) => s.id === state.fbStageId)) {
+    state.fbStageId = stages[0]?.id || '';
+  }
+}
+
+/* ==================== Build Slot & Picker Rendering (100% Bilingual) ==================== */
+function renderPsychubeThumbHtml(rawPsy, sizeClass = '', lang = getLang()) {
   const psy = resolvePsychube(rawPsy);
   if (!psy) {
     return `<span class="psy-thumb is-fallback ${sizeClass}"><span>✦</span></span>`;
   }
+  const pName = displayPsychubeName(psy, lang);
+  const pStat = displayPsychubeStat(psy, lang);
   return `
-    <span class="psy-thumb ${sizeClass}" title="${esc(psy.name)}（${psy.star}★ · ${esc(psy.stat)}）">
-      <img class="psy-thumb-bg" src="${esc(psychubeFrameSrc(psy.star))}" alt="" aria-hidden="true" loading="lazy" />
-      <img class="psy-thumb-icon" src="${esc(psychubeIconSrc(psy.id))}" alt="${esc(psy.name)}" loading="lazy" />
+    <span class="psy-thumb ${sizeClass}" title="${esc(pName)} (${psy.star}★ · ${esc(pStat)})">
+      <img class="psy-thumb-bg" src="${esc(psychubeFrameSrc(psy.star))}" alt="" aria-hidden="true" loading="eager" />
+      <img class="psy-thumb-icon" src="${esc(psychubeIconSrc(psy.id))}" alt="${esc(pName)}" loading="eager" />
     </span>`;
 }
 
-function renderCharPickerThumbHtml(char) {
+function renderCharPickerThumbHtml(char, lang = getLang()) {
   const affKey = char.aff || 'unknown';
   const aff = AFFLATUS_META[affKey] || AFFLATUS_META.unknown;
+  const charDisplay = displayCharacterName(char.name, lang);
+  const affDisplay = localizeAfflatus(affKey, lang);
   return `
     <span class="char-picker-card-art">
-      <img class="slot-card-bg" src="./assets/uttu/bg_kapaidi.png" alt="" aria-hidden="true" loading="lazy" />
-      ${char.portrait ? `<img class="slot-portrait" src="${esc(char.portrait)}" alt="${esc(char.name)}" loading="lazy" />` : ''}
-      <img class="slot-rarity-layer" src="${esc(rarityOverlaySrc(char.star || 6))}" alt="" aria-hidden="true" loading="lazy" />
+      <img class="slot-card-bg" src="./assets/uttu/bg_kapaidi.png" alt="" aria-hidden="true" loading="eager" />
+      ${char.portrait ? `<img class="slot-portrait" src="${esc(char.portrait)}" alt="${esc(charDisplay)}" loading="eager" />` : ''}
+      <img class="slot-rarity-layer" src="${esc(rarityOverlaySrc(char.star || 6))}" alt="" aria-hidden="true" loading="eager" />
       <div class="slot-vignette" aria-hidden="true"></div>
-      ${aff.icon ? `<img class="slot-aff-img" src="${esc(aff.icon)}" alt="${esc(aff.label)}" loading="lazy" />` : ''}
+      ${aff.icon ? `<img class="slot-aff-img" src="${esc(aff.icon)}" alt="${esc(affDisplay)}" loading="eager" />` : ''}
     </span>`;
 }
 
-function renderBuildSlotItemHtml(idx) {
+function renderBuildSlotItemHtml(idx, lang = getLang()) {
   const rawChar = String(modalBuildState.chars[idx] || '').trim();
   const canCarry = canMarkSlotCarry(rawChar);
   const resolvedChar = canCarry ? resolveCharacter(rawChar) : null;
-  const charLabel = resolvedChar?.name || rawChar;
+  const charLabel = rawChar ? displayCharacterName(rawChar, lang) : '';
   const isCarry = canCarry && modalBuildState.carries[idx];
   const psyVal = modalBuildState.psychubes[idx] || '';
-  const psy = psyVal ? resolvePsychube(psyVal) : null;
-  const psyDisplay = psy?.name || psyVal;
+  const psyDisplay = psyVal ? displayPsychubeName(psyVal, lang) : '';
   const resVal = modalBuildState.resonanceCodes[idx] || '';
   const aff = AFFLATUS_META[resolvedChar?.aff || 'unknown'] || AFFLATUS_META.unknown;
+  const n = idx + 1;
 
   return `
     <div class="build-slot-card ${rawChar ? 'has-char' : 'is-unfilled'} ${isCarry ? 'is-carry-slot' : ''}" data-build-slot="${idx}">
       <div class="build-slot-head">
         <div class="build-slot-head-left">
-          <span class="build-slot-index">${idx + 1}号位</span>
-          <span class="build-slot-char">${esc(charLabel || (idx === 0 ? '待选择角色' : '可留空'))}</span>
+          <span class="build-slot-index">${esc(t('slotLabel', { n }, lang))}</span>
+          <span class="build-slot-char">${esc(charLabel || (idx === 0 ? t('slotPendingChar', {}, lang) : t('slotOptional', {}, lang)))}</span>
         </div>
-        <button type="button" class="carry-check-btn ${isCarry ? 'checked' : ''}" data-toggle-carry="${idx}" role="checkbox" aria-checked="${isCarry}" ${canCarry ? '' : 'disabled'} title="${canCarry ? '勾选或取消主 C（支持共同主 C）' : '主 C 需选明确的单名角色'}">
+        <button type="button" class="carry-check-btn ${isCarry ? 'checked' : ''}" data-toggle-carry="${idx}" role="checkbox" aria-checked="${isCarry}" ${canCarry ? '' : 'disabled'} title="${esc(canCarry ? t('slotMainDpsTitle', {}, lang) : t('slotMainDpsDisabled', {}, lang))}">
           <span class="carry-check-box" aria-hidden="true">${isCarry ? '✓' : ''}</span>
-          <span>主 C</span>
+          <span>${esc(t('slotMainDps', {}, lang))}</span>
         </button>
       </div>
       <div class="build-slot-squares">
         <div class="picker-slot-wrap">
-          <button type="button" class="picker-slot-box char-picker-trigger ${rawChar ? 'is-selected' : ''} ${isCarry ? 'is-carry' : ''}" data-pick-char="${idx}" title="${rawChar ? `更换 ${idx + 1} 号位角色：${esc(charLabel)}` : `点击选择 ${idx + 1} 号位角色`}">
+          <button type="button" class="picker-slot-box char-picker-trigger ${rawChar ? 'is-selected' : ''} ${isCarry ? 'is-carry' : ''}" data-pick-char="${idx}" title="${esc(rawChar ? `${t('slotPickChar', {}, lang)} · ${charLabel}` : t('slotPickChar', {}, lang))}">
             ${rawChar
               ? `<span class="char-slot-thumb">
                    <img class="slot-card-bg" src="./assets/uttu/bg_kapaidi.png" alt="" aria-hidden="true" />
@@ -433,61 +743,68 @@ function renderBuildSlotItemHtml(idx) {
                  </span>
                  <span class="picker-slot-name">${esc(charLabel)}</span>`
               : `<span class="picker-slot-plus" aria-hidden="true">＋</span>
-                 <span class="picker-slot-label">选角色</span>`
+                 <span class="picker-slot-label">${esc(t('slotPickChar', {}, lang))}</span>`
             }
           </button>
-          ${rawChar ? `<button type="button" class="psy-slot-clear" data-clear-char="${idx}" aria-label="清除 ${idx + 1} 号位角色" title="清除角色">×</button>` : ''}
+          ${rawChar ? `<button type="button" class="psy-slot-clear" data-clear-char="${idx}" aria-label="${esc(t('slotClearChar', { n }, lang))}" title="${esc(t('slotClearChar', { n }, lang))}">×</button>` : ''}
         </div>
 
         <div class="picker-slot-wrap">
-          <button type="button" class="picker-slot-box ${psyDisplay ? 'is-selected' : ''}" data-pick-psy="${idx}" title="${psyDisplay ? `更换 ${idx + 1} 号位心相：${esc(psyDisplay)}` : `点击选择 ${idx + 1} 号位心相（选填）`}">
+          <button type="button" class="picker-slot-box ${psyDisplay ? 'is-selected' : ''}" data-pick-psy="${idx}" title="${esc(psyDisplay ? `${t('slotPickPsy', {}, lang)} · ${psyDisplay}` : t('slotPickPsy', {}, lang))}">
             ${psyDisplay
-              ? `${renderPsychubeThumbHtml(psyDisplay, 'in-slot')}
+              ? `${renderPsychubeThumbHtml(psyVal, 'in-slot', lang)}
                  <span class="picker-slot-name">${esc(psyDisplay)}</span>`
               : `<span class="picker-slot-plus" aria-hidden="true">＋</span>
-                 <span class="picker-slot-label">选心相</span>`
+                 <span class="picker-slot-label">${esc(t('slotPickPsy', {}, lang))}</span>`
             }
           </button>
-          ${psyDisplay ? `<button type="button" class="psy-slot-clear" data-clear-psy="${idx}" aria-label="清除 ${idx + 1} 号位心相" title="清除心相">×</button>` : ''}
+          ${psyDisplay ? `<button type="button" class="psy-slot-clear" data-clear-psy="${idx}" aria-label="${esc(t('slotClearPsy', { n }, lang))}" title="${esc(t('slotClearPsy', { n }, lang))}">×</button>` : ''}
         </div>
       </div>
       <div class="res-slot-wrap">
-        <input type="text" class="res-code-input" data-res-slot="${idx}" maxlength="160" autocomplete="off" spellcheck="false" placeholder="粘贴 ${idx + 1} 号位共鸣码（选填）" value="${esc(resVal)}" aria-label="${idx + 1}号位共鸣码" />
+        <input type="text" class="res-code-input" data-res-slot="${idx}" maxlength="160" autocomplete="off" spellcheck="false" placeholder="${esc(t('slotResPlaceholder', { n }, lang))}" value="${esc(resVal)}" aria-label="${esc(t('slotResPlaceholder', { n }, lang))}" />
       </div>
     </div>`;
 }
 
-function renderTeamBuilderSummaryText() {
+function renderTeamBuilderSummaryText(lang = getLang()) {
   const chosen = modalBuildState.chars.map((c, i) => ({ c, i })).filter((x) => x.c);
-  const carries = chosen.filter((x) => modalBuildState.carries[x.i]).map((x) => x.c);
-  if (!chosen.length) return '支持 1–4 人（少人解空位留空即可），点选角色并勾选主 C';
-  return `已选 ${chosen.length} 人（支持 1–4 人）· 主 C：${carries.length ? carries.join(' / ') : '未勾选（请点击右上角「主 C」）'}`;
+  const carries = chosen
+    .filter((x) => modalBuildState.carries[x.i])
+    .map((x) => displayCharacterName(x.c, lang));
+  if (!chosen.length) return t('teamBuilderEmptyHint', {}, lang);
+  return t('teamBuilderSummary', {
+    n: chosen.length,
+    carries: carries.length ? carries.join(' / ') : t('teamBuilderNoCarry', {}, lang)
+  }, lang);
 }
 
-function renderTeamBuilderFieldHtml() {
+function renderTeamBuilderFieldHtml(lang = getLang()) {
   return `
     <div class="field build-slots-field">
       <div class="build-slots-label-row">
-        <label>上阵角色、主 C 与配装 *（1–4 人，少人解可留空）</label>
-        <span class="build-slots-hint" id="teamBuilderSummary">${esc(renderTeamBuilderSummaryText())}</span>
+        <label>${esc(t('teamBuilderLabel', {}, lang))}</label>
+        <span class="build-slots-hint" id="teamBuilderSummary">${esc(renderTeamBuilderSummaryText(lang))}</span>
       </div>
       <div class="build-slots-grid" id="buildSlotsGrid">
-        ${[0, 1, 2, 3].map((idx) => renderBuildSlotItemHtml(idx)).join('')}
+        ${[0, 1, 2, 3].map((idx) => renderBuildSlotItemHtml(idx, lang)).join('')}
       </div>
     </div>`;
 }
 
 function refreshBuildSlotsGrid() {
+  const lang = getLang();
   const grid = $('#buildSlotsGrid');
   if (grid) {
-    grid.innerHTML = [0, 1, 2, 3].map((idx) => renderBuildSlotItemHtml(idx)).join('');
+    grid.innerHTML = [0, 1, 2, 3].map((idx) => renderBuildSlotItemHtml(idx, lang)).join('');
   }
   const summary = $('#teamBuilderSummary');
-  if (summary) summary.textContent = renderTeamBuilderSummaryText();
+  if (summary) summary.textContent = renderTeamBuilderSummaryText(lang);
   const submitForm = $('#maneSubmitForm, #fbSubmitForm');
   if (submitForm) saveSubmitDraftFromForm(submitForm);
 }
 
+/* ==================== Submission Draft Storage ==================== */
 const SUBMIT_DRAFT_KEYS = {
   mane: 'r1999-mane-submit-draft-v1',
   flashback: 'r1999-fb-submit-draft-v1'
@@ -501,7 +818,7 @@ function draftHasContent(board, d) {
     (Array.isArray(d.resonanceCodes) && d.resonanceCodes.some(Boolean));
   if (hasSlots) return true;
   if (board === 'mane') {
-    return Boolean(String(d.score || '').trim() || String(d.related_url || '').trim() || String(d.contact || '').trim());
+    return Boolean(String(d.display_name || '').trim() || String(d.score || '').trim() || String(d.related_url || '').trim() || String(d.contact || '').trim());
   }
   return Boolean(String(d.rounds ?? '').trim() !== '' || d.resonanceTen || String(d.relatedUrl || '').trim() || String(d.contact || '').trim());
 }
@@ -562,6 +879,7 @@ function saveSubmitDraftFromForm(form) {
         updatedAt: Date.now()
       }
     : {
+        nickname: String(fd.get('nickname') ?? ''),
         version: String(fd.get('version') ?? ''),
         stage: String(fd.get('stage') ?? ''),
         group: String(fd.get('group') ?? ''),
@@ -584,6 +902,7 @@ function saveSubmitDraftFromForm(form) {
   if (clearBtn) clearBtn.hidden = !hasContent;
 }
 
+/* ==================== Arcanist & Psychube Codex Pickers ==================== */
 function charactersInOtherSlots() {
   const used = new Map();
   for (let i = 0; i < 4; i++) {
@@ -594,6 +913,7 @@ function charactersInOtherSlots() {
 }
 
 function syncCharPickerSelection() {
+  const lang = getLang();
   const overlay = $('#charPickerOverlay');
   if (!overlay) return;
   const choices = charPickerState.choices;
@@ -605,11 +925,22 @@ function syncCharPickerSelection() {
     button.setAttribute('aria-pressed', String(pressed));
   });
   const summary = $('#charPickerSelection');
-  summary.textContent = choices.length ? choices.join(' / ') : '请选择角色或任意位';
-  $('#confirmCharSelection').disabled = choices.length === 0;
+  if (summary) {
+    if (!choices.length) {
+      summary.textContent = L('Select an arcanist or flex wildcard', '请选择角色或任意位', lang);
+    } else {
+      const displayNames = choices.map((c) => displayCharacterName(c, lang)).join(' / ');
+      summary.textContent = choices.length > 1
+        ? `${t('charPickerMultiHint', { n: choices.length }, lang)}: ${displayNames}`
+        : displayNames;
+    }
+  }
+  const confirmBtn = $('#confirmCharSelection');
+  if (confirmBtn) confirmBtn.disabled = choices.length === 0;
 }
 
 function refreshCharPickerResults() {
+  const lang = getLang();
   const grid = $('#charPickerGrid');
   if (!grid) return;
   const q = normKey(charPickerState.query);
@@ -629,16 +960,19 @@ function refreshCharPickerResults() {
   grid.innerHTML = filtered.length
     ? filtered.map((c) => {
         const usedSlot = usedInOtherSlots.get(`char:${c.id}`);
+        const charDisplay = displayCharacterName(c.name, lang);
+        const affDisplay = localizeAfflatus(c.aff, lang);
+        const usedText = usedSlot ? L(`In Slot ${usedSlot}`, `已在 ${usedSlot} 号位`, lang) : `${c.star}★ · ${affDisplay}`;
         return `
-          <button type="button" class="char-card-option ${usedSlot ? 'is-used' : ''}" data-choose-char="${esc(c.name)}" ${usedSlot ? 'disabled' : ''} title="${esc(c.name)}（${c.star}★${usedSlot ? ` · 已在 ${usedSlot} 号位` : ''}）">
-            ${renderCharPickerThumbHtml(c)}
-            <span class="char-opt-name">${esc(c.name)}</span>
-            <span class="char-opt-meta">${usedSlot ? `已在 ${usedSlot} 号位` : `${c.star}★ · ${(AFFLATUS_META[c.aff]?.label || '')}`}</span>
+          <button type="button" class="char-card-option ${usedSlot ? 'is-used' : ''}" data-choose-char="${esc(c.name)}" ${usedSlot ? 'disabled' : ''} title="${esc(charDisplay)} (${c.star}★${usedSlot ? ` · ${usedText}` : ''})">
+            ${renderCharPickerThumbHtml(c, lang)}
+            <span class="char-opt-name">${esc(charDisplay)}</span>
+            <span class="char-opt-meta">${esc(usedText)}</span>
           </button>`;
       }).join('')
-    : '<div class="empty-state" style="grid-column:1/-1;padding:12px"><p>没有匹配的角色，可在下方手动填入。</p></div>';
+    : `<div class="empty-state" style="grid-column:1/-1;padding:12px"><p>${esc(t('charPickerEmpty', {}, lang))}</p></div>`;
   grid.scrollTop = 0;
-  $('#charPickerOverlay').querySelectorAll('[data-char-aff], [data-char-star]').forEach((button) => {
+  $('#charPickerOverlay')?.querySelectorAll('[data-char-aff], [data-char-star]').forEach((button) => {
     const active = button.dataset.charAff === charPickerState.aff || button.dataset.charStar === charPickerState.star;
     button.classList.toggle('active', active);
     button.setAttribute('aria-pressed', String(active));
@@ -647,6 +981,7 @@ function refreshCharPickerResults() {
 }
 
 function renderCharPicker() {
+  const lang = getLang();
   const root = $('#charPickerRoot');
   if (!root) return;
   if (!charPickerState.open) {
@@ -656,49 +991,57 @@ function renderCharPicker() {
   const currentVal = modalBuildState.chars[charPickerState.slotIndex] || '';
   const customVal = splitSlotChoices(currentVal).some((name) => !isAnySlotChoice(name) && !resolveCharacter(name))
     ? currentVal : '';
+  const n = charPickerState.slotIndex + 1;
 
   root.innerHTML = `
     <div class="psy-picker-overlay" id="charPickerOverlay">
-      <section class="psy-picker-box" role="dialog" aria-modal="true" aria-label="神秘学家图鉴选择器">
-        <button type="button" class="modal-close" data-action="close-char-picker" aria-label="关闭角色选择">×</button>
-        <div class="modal-eyebrow">ARCANIST CODEX · 全角色图鉴（共 ${CHARACTER_LIST.length} 名）</div>
-        <h3>为 ${charPickerState.slotIndex + 1} 号位选择上阵角色</h3>
+      <section class="psy-picker-box" role="dialog" aria-modal="true" aria-label="${esc(t('charPickerTitle', { n }, lang))}">
+        <button type="button" class="modal-close" data-action="close-char-picker" aria-label="${esc(t('btnClose', {}, lang))}">×</button>
+        <div class="modal-eyebrow">${esc(L(`ARCANIST CODEX · ${CHARACTER_LIST.length} ARCANISTS`, `ARCANIST CODEX · 全角色图鉴（共 ${CHARACTER_LIST.length} 名）`, lang))}</div>
+        <h3>${esc(t('charPickerTitle', { n }, lang))}</h3>
         <div class="psy-picker-toolbar">
           <div class="psy-picker-filters">
-            <div class="psy-chip-group" role="group" aria-label="按灵感筛选角色">
-              <button type="button" class="psy-chip ${charPickerState.aff === 'all' ? 'active' : ''}" data-char-aff="all">全部灵感</button>
+            <div class="psy-chip-group" role="group" aria-label="${esc(t('afflatusFilterAria', {}, lang))}">
+              <button type="button" class="psy-chip ${charPickerState.aff === 'all' ? 'active' : ''}" data-char-aff="all">${esc(t('afflatusAll', {}, lang))}</button>
               ${FILTER_AFFLATUS.map((affKey) => {
                 const meta = AFFLATUS_META[affKey];
                 return `
                   <button type="button" class="psy-chip has-aff-icon ${charPickerState.aff === affKey ? 'active' : ''}" data-char-aff="${affKey}">
                     <img src="${esc(meta.icon)}" alt="" aria-hidden="true" />
-                    <span>${esc(meta.label)}</span>
+                    <span>${esc(localizeAfflatus(affKey, lang))}</span>
                   </button>`;
               }).join('')}
             </div>
-            <div class="psy-chip-group" role="group" aria-label="按星级筛选角色">
-              ${[['all', '全星级'], ['6', '6★'], ['5', '5★'], ['low', '4★及以下']].map(([val, lbl]) =>
-                `<button type="button" class="psy-chip ${charPickerState.star === val ? 'active' : ''}" data-char-star="${val}">${lbl}</button>`
+            <div class="psy-chip-group" role="group" aria-label="${esc(t('charPickerAllStars', {}, lang))}">
+              ${[
+                ['all', t('charPickerAllStars', {}, lang)],
+                ['6', '6★'],
+                ['5', '5★'],
+                ['low', L('≤4★', '4★及以下', lang)]
+              ].map(([val, lbl]) =>
+                `<button type="button" class="psy-chip ${charPickerState.star === val ? 'active' : ''}" data-char-star="${val}">${esc(lbl)}</button>`
               ).join('')}
             </div>
           </div>
           <div class="search-input-wrap">
             <img class="search-input-icon" src="./assets/uttu/btn_search.webp" alt="" aria-hidden="true" />
-            <input id="charPickerSearch" class="filter-input has-icon" type="search" aria-label="搜索角色" placeholder="搜索角色名、英文名或简称…" value="${esc(charPickerState.query)}" />
+            <input id="charPickerSearch" class="filter-input has-icon" type="search" aria-label="${esc(t('charPickerSearchPlaceholder', {}, lang))}" placeholder="${esc(t('charPickerSearchPlaceholder', {}, lang))}" value="${esc(charPickerState.query)}" />
           </div>
         </div>
-        <div class="psy-chip-group" role="group" aria-label="任意位">
-          ${ANY_SLOT_CHOICES.map((name) => `<button type="button" class="psy-chip" data-choose-char="${name}">${name}</button>`).join('')}
+        <div class="psy-chip-group" role="group" aria-label="${esc(t('charPickerWildcardHeading', {}, lang))}">
+          ${WILDCARD_CHOICES.map((wc) => `
+            <button type="button" class="psy-chip" data-choose-char="${esc(wc.cn)}">${esc(isEn(lang) ? wc.en : wc.cn)}</button>
+          `).join('')}
         </div>
         <div id="charPickerGrid" class="char-picker-grid" style="min-height:0;flex:1 1 auto"></div>
         <div class="char-custom-row" style="align-items:center">
           <small id="charPickerSelection" class="field-hint" role="status" style="flex:1;min-width:0;overflow-wrap:anywhere"></small>
-          <button id="confirmCharSelection" type="button" class="copper-btn" data-action="confirm-char-selection">确认选择</button>
+          <button id="confirmCharSelection" type="button" class="copper-btn" data-action="confirm-char-selection">${esc(t('charPickerConfirm', {}, lang))}</button>
         </div>
-        <small class="field-hint">同一位置可勾选多个备选角色，也可以选一个任意位。</small>
+        <small class="field-hint">${esc(t('charPickerSub', {}, lang))}</small>
         <div class="char-custom-row">
-          <input id="charCustomInput" type="text" maxlength="40" aria-label="手动填写角色" placeholder="手动填入角色，备选用 / 隔开" value="${esc(customVal)}" />
-          <button type="button" class="outline-btn" data-action="apply-custom-char">手动填入</button>
+          <input id="charCustomInput" type="text" maxlength="40" aria-label="${esc(L('Custom arcanist input', '手动填写角色', lang))}" placeholder="${esc(L('Custom name or flex options separated by /', '手动填入角色，备选用 / 隔开', lang))}" value="${esc(customVal)}" />
+          <button type="button" class="outline-btn" data-action="apply-custom-char">${esc(L('Apply', '手动填入', lang))}</button>
         </div>
       </section>
     </div>`;
@@ -722,36 +1065,45 @@ function closeCharPicker() {
 }
 
 function chooseCharacterForSlot(name) {
-  const key = canonicalCharacterKey(name);
+  const canon = canonicalStoredSlotChoice(name);
+  const key = canonicalCharacterKey(canon);
   const choices = charPickerState.choices;
   if (choices.some((selected) => canonicalCharacterKey(selected) === key)) {
     charPickerState.choices = choices.filter((selected) => canonicalCharacterKey(selected) !== key);
-  } else if (isAnySlotChoice(name)) {
-    charPickerState.choices = [name];
+  } else if (isAnySlotChoice(canon)) {
+    charPickerState.choices = [canon];
   } else {
-    charPickerState.choices = [...choices.filter((selected) => !isAnySlotChoice(selected)), name];
+    charPickerState.choices = [...choices.filter((selected) => !isAnySlotChoice(selected)), canon];
   }
   syncCharPickerSelection();
 }
 
 function commitCharPickerChoices(choices) {
-  const names = choices.map((name) => isAnySlotChoice(name) ? name : (resolveCharacter(name)?.name || name));
+  const lang = getLang();
+  const names = choices.map(canonicalStoredSlotChoice);
   const slot = names.join('/');
   if (!names.length || names.some((name) => !name) || Array.from(slot).length > 40) {
-    throw new Error('请填写有效角色，单个位置合计最多 40 字。');
+    throw new Error(t('errSlotNameTooLong', {}, lang));
   }
-  if (names.length > 1 && names.some(isAnySlotChoice)) throw new Error('任意位需单独选择。');
+  if (names.length > 1 && names.some(isAnySlotChoice)) {
+    throw new Error(L('Wildcard slots must be selected alone.', '任意位需单独选择。', lang));
+  }
   const keys = names.map(canonicalCharacterKey);
-  if (new Set(keys).size !== keys.length) throw new Error('请选择不同的备选角色。');
+  if (new Set(keys).size !== keys.length) {
+    throw new Error(L('Please pick distinct flex alternatives.', '请选择不同的备选角色。', lang));
+  }
   const used = charactersInOtherSlots();
   for (const key of keys) {
-    if (used.has(key)) throw new Error(`「${names[keys.indexOf(key)]}」已在 ${used.get(key)} 号位。`);
+    if (used.has(key)) {
+      const disp = displayCharacterName(names[keys.indexOf(key)], lang);
+      throw new Error(L(`"${disp}" is already in Slot ${used.get(key)}.`, `「${disp}」已在 ${used.get(key)} 号位。`, lang));
+    }
   }
   const index = charPickerState.slotIndex;
   const flashbackForm = $('#fbSubmitForm, #fbEditForm');
   if (flashbackForm) {
     const proposedTeam = modalBuildState.chars.map((value, i) => i === index ? slot : value).filter(Boolean);
-    validateLineup(proposedTeam);
+    validateLineup(proposedTeam, lang);
   }
   modalBuildState.chars[index] = slot;
   if (!canMarkSlotCarry(slot)) modalBuildState.carries[index] = false;
@@ -760,32 +1112,29 @@ function commitCharPickerChoices(choices) {
 }
 
 function refreshPsychubePickerResults() {
+  const lang = getLang();
   const grid = $('#psyPickerGrid');
   if (!grid) return;
-  const q = normKey(psyPickerState.query);
+  const q = psyPickerState.query;
   const filtered = PSYCHUBES.filter((p) => {
     if (psyPickerState.star !== 'all' && String(p.star) !== psyPickerState.star) return false;
     if (psyPickerState.tag !== '全部' && !p.tags.includes(psyPickerState.tag)) return false;
-    if (!q) return true;
-    return (
-      normKey(p.name).includes(q) ||
-      normKey(p.en).includes(q) ||
-      normKey(p.stat).includes(q) ||
-      p.tags.some((t) => normKey(t).includes(q)) ||
-      normKey(p.version).includes(q)
-    );
+    return psychubeMatchesQuery(p, q);
   });
   grid.innerHTML = filtered.length
     ? filtered.map((p) => {
-        const isSelected = modalBuildState.psychubes[psyPickerState.slotIndex] === p.name;
+        const currentPsy = resolvePsychube(modalBuildState.psychubes[psyPickerState.slotIndex]);
+        const isSelected = currentPsy?.id === p.id || modalBuildState.psychubes[psyPickerState.slotIndex] === p.name;
+        const pName = displayPsychubeName(p, lang);
+        const pStat = displayPsychubeStat(p, lang);
         return `
-          <button type="button" class="psy-card-option ${isSelected ? 'is-selected' : ''}" data-choose-psy="${esc(p.name)}" title="${esc(p.name)}（${p.star}★ · ${esc(p.stat)} · v${esc(p.version)}）">
-            ${renderPsychubeThumbHtml(p.id, 'in-picker')}
-            <span class="psy-opt-name">${esc(p.name)}</span>
-            <span class="psy-opt-meta">${p.star}★ · ${esc(p.stat)}</span>
+          <button type="button" class="psy-card-option ${isSelected ? 'is-selected' : ''}" data-choose-psy="${esc(p.name)}" title="${esc(pName)} (${p.star}★ · ${esc(pStat)} · v${esc(p.version)})">
+            ${renderPsychubeThumbHtml(p.id, 'in-picker', lang)}
+            <span class="psy-opt-name">${esc(pName)}</span>
+            <span class="psy-opt-meta">${p.star}★ · ${esc(pStat)}</span>
           </button>`;
       }).join('')
-    : '<div class="empty-state" style="grid-column:1/-1;padding:28px 12px"><p>没有匹配的心相，请更换关键词或重置标签筛选。</p></div>';
+    : `<div class="empty-state" style="grid-column:1/-1;padding:28px 12px"><p>${esc(t('psyPickerEmpty', {}, lang))}</p></div>`;
   grid.scrollTop = 0;
   $('#psyPickerOverlay')?.querySelectorAll('[data-psy-star], [data-psy-tag]').forEach((button) => {
     const active = button.dataset.psyStar === psyPickerState.star || button.dataset.psyTag === psyPickerState.tag;
@@ -795,39 +1144,46 @@ function refreshPsychubePickerResults() {
 }
 
 function renderPsychubePicker() {
+  const lang = getLang();
   const root = $('#psyPickerRoot');
   if (!root) return;
   if (!psyPickerState.open) {
     root.innerHTML = '';
     return;
   }
-
-  const targetTitle = psyPickerState.charName
-    ? `为 ${psyPickerState.slotIndex + 1} 号位「${psyPickerState.charName}」选择心相`
-    : `为 ${psyPickerState.slotIndex + 1} 号位选择心相`;
+  const n = psyPickerState.slotIndex + 1;
+  const charDisplay = psyPickerState.charName ? displayCharacterName(psyPickerState.charName, lang) : '';
+  const targetTitle = charDisplay
+    ? `${t('psyPickerTitle', { n }, lang)} · ${charDisplay}`
+    : t('psyPickerTitle', { n }, lang);
 
   root.innerHTML = `
     <div class="psy-picker-overlay" id="psyPickerOverlay">
-      <section class="psy-picker-box" role="dialog" aria-modal="true" aria-label="心相图鉴选择器">
-        <button type="button" class="modal-close" data-action="close-psy-picker" aria-label="关闭心相选择">×</button>
-        <div class="modal-eyebrow">PSYCHUBE CODEX · 官方心相图鉴（共 ${PSYCHUBES.length} 张）</div>
+      <section class="psy-picker-box" role="dialog" aria-modal="true" aria-label="${esc(targetTitle)}">
+        <button type="button" class="modal-close" data-action="close-psy-picker" aria-label="${esc(t('btnClose', {}, lang))}">×</button>
+        <div class="modal-eyebrow">${esc(L(`PSYCHUBE CODEX · ${PSYCHUBES.length} PSYCHUBES`, `PSYCHUBE CODEX · 官方心相图鉴（共 ${PSYCHUBES.length} 张）`, lang))}</div>
         <h3>${esc(targetTitle)}</h3>
         <div class="psy-picker-toolbar">
           <div class="psy-picker-filters">
-            <div class="psy-chip-group" role="group" aria-label="按星级筛选心相">
-              ${[['all', '全部星级'], ['6', '6★'], ['5', '5★'], ['4', '4★']].map(([val, lbl]) =>
-                `<button type="button" class="psy-chip ${psyPickerState.star === val ? 'active' : ''}" data-psy-star="${val}">${lbl}</button>`
+            <div class="psy-chip-group" role="group" aria-label="${esc(t('charPickerAllStars', {}, lang))}">
+              ${[
+                ['all', t('charPickerAllStars', {}, lang)],
+                ['6', '6★'],
+                ['5', '5★'],
+                ['4', '4★']
+              ].map(([val, lbl]) =>
+                `<button type="button" class="psy-chip ${psyPickerState.star === val ? 'active' : ''}" data-psy-star="${val}">${esc(lbl)}</button>`
               ).join('')}
             </div>
-            <div class="psy-chip-group" role="group" aria-label="按定位系别筛选心相">
-              ${PSYCHUBE_TAGS.map((tag) =>
-                `<button type="button" class="psy-chip ${psyPickerState.tag === tag ? 'active' : ''}" data-psy-tag="${esc(tag)}">${esc(tag)}</button>`
+            <div class="psy-chip-group" role="group" aria-label="${esc(L('Filter by Psychube tag', '按定位系别筛选心相', lang))}">
+              ${PSYCHUBE_TAGS_META.map((meta) =>
+                `<button type="button" class="psy-chip ${psyPickerState.tag === meta.key ? 'active' : ''}" data-psy-tag="${esc(meta.key)}">${esc(displayPsychubeTag(meta.key, lang))}</button>`
               ).join('')}
             </div>
           </div>
           <div class="search-input-wrap">
             <img class="search-input-icon" src="./assets/uttu/btn_search.webp" alt="" aria-hidden="true" />
-            <input id="psyPickerSearch" class="filter-input has-icon" type="search" aria-label="搜索心相" placeholder="搜索心相名称、词条（暴击/术法/仪式/治疗）…" value="${esc(psyPickerState.query)}" />
+            <input id="psyPickerSearch" class="filter-input has-icon" type="search" aria-label="${esc(t('psyPickerSearchPlaceholder', {}, lang))}" placeholder="${esc(t('psyPickerSearchPlaceholder', {}, lang))}" value="${esc(psyPickerState.query)}" />
           </div>
         </div>
         <div id="psyPickerGrid" class="psy-picker-grid"></div>
@@ -852,19 +1208,11 @@ function closePsychubePicker() {
   renderPsychubePicker();
 }
 
-/* ==================== 通用工具 ==================== */
+/* ==================== Core Utilities ==================== */
 function uid() {
   return (globalThis.crypto?.randomUUID)
     ? crypto.randomUUID()
     : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function formatScore(score) {
-  try {
-    return BigInt(score).toLocaleString('zh-CN');
-  } catch {
-    return Number(score || 0).toLocaleString('zh-CN');
-  }
 }
 
 function normKey(text) {
@@ -879,46 +1227,15 @@ function splitTeam(value) {
   return String(value ?? '').split(/[、，,;；\n]+/).map((s) => s.trim()).filter(Boolean);
 }
 
-function formatMonthDay(time) {
-  if (!time) return '';
-  return new Date(time).toLocaleDateString('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    month: '2-digit',
-    day: '2-digit'
-  });
-}
-
-function formatMonthDayTime(time) {
-  if (!time) return '';
-  const parts = new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    month: 'numeric',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false
-  }).formatToParts(new Date(time));
-  const get = (t) => parts.find((p) => p.type === t)?.value || '';
-  return `${get('month')}月${get('day')}日 ${get('hour')}:${get('minute')}`;
-}
-
-function formatDateTime(time) {
-  if (!time) return '';
-  return new Date(time).toLocaleString('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false
-  });
-}
-
 function parseHttpUrl(value) {
   const text = String(value ?? '').trim();
   if (!text) return '';
-  const url = new URL(text);
+  let url;
+  try {
+    url = new URL(text);
+  } catch {
+    throw new Error(t('errUrlInvalid'));
+  }
   if (
     !['http:', 'https:'].includes(url.protocol) ||
     url.username ||
@@ -926,12 +1243,12 @@ function parseHttpUrl(value) {
     /[\s\\]/u.test(text) ||
     url.href.length > 2048
   ) {
-    throw new Error('请输入有效的 HTTP 或 HTTPS 相关链接。');
+    throw new Error(t('errUrlInvalid'));
   }
   return url.href;
 }
 
-function safeLinkHtml(value, label = '相关链接 ↗') {
+function safeLinkHtml(value, label = t('relatedLink')) {
   try {
     const href = parseHttpUrl(value);
     if (!href) return '';
@@ -950,9 +1267,10 @@ function optionsHtml(pairs, selected) {
 function toast(message) {
   clearTimeout(toastTimer);
   const el = $('#toast');
+  if (!el) return;
   el.textContent = message;
   el.classList.add('visible');
-  toastTimer = setTimeout(() => el.classList.remove('visible'), 3600);
+  toastTimer = setTimeout(() => el.classList.remove('visible'), 3800);
 }
 
 async function copyText(text) {
@@ -972,20 +1290,51 @@ async function copyText(text) {
   ta.select();
   const ok = document.execCommand('copy');
   ta.remove();
-  if (!ok) throw new Error('未能写入剪贴板，请长按手动复制。');
+  if (!ok) throw new Error(t('toastCopyFailed'));
 }
 
 function openModal(html, wide = false) {
   $('#modalRoot').innerHTML = `
     <div class="modal-overlay" id="modalOverlay">
       <section class="modal-box ${wide ? 'wide' : ''}" role="dialog" aria-modal="true">
-        <button type="button" class="modal-close" data-action="close-modal" aria-label="关闭弹窗">×</button>
+        <button type="button" class="modal-close" data-action="close-modal" aria-label="${esc(t('btnClose'))}">×</button>
         ${html}
       </section>
     </div>`;
 }
 
 let activeUploadPreviewUrl = '';
+
+function renderGlobalServerNoticeHtml(kind, lang = getLang()) {
+  if (!isEn(lang)) return '';
+  if (kind === 'fb-board') {
+    return `
+      <div class="global-server-notice is-warning" role="note">
+        <div class="global-server-notice-body">
+          <span class="global-server-notice-tag">${esc(t('globalFbNoticeTag', {}, lang))}</span>
+          <p>${esc(t('globalFbBoardNotice', {}, lang))}</p>
+        </div>
+        <button type="button" class="outline-btn global-server-notice-cta" data-action="switch-to-mane">${esc(t('globalFbBoardCta', {}, lang))}</button>
+      </div>`;
+  }
+  if (kind === 'fb-submit') {
+    return `
+      <div class="global-server-notice is-warning in-modal" role="note">
+        <div class="global-server-notice-body">
+          <span class="global-server-notice-tag">${esc(t('globalFbNoticeTag', {}, lang))}</span>
+          <p>${esc(t('globalFbSubmitNotice', {}, lang))}</p>
+        </div>
+        <button type="button" class="outline-btn global-server-notice-cta" data-action="switch-to-mane-submit">${esc(t('globalFbSubmitCta', {}, lang))}</button>
+      </div>`;
+  }
+  return `
+    <div class="global-server-notice is-welcome${kind === 'mane-welcome' ? ' in-modal' : ''}" role="note">
+      <div class="global-server-notice-body">
+        <span class="global-server-notice-tag">${esc(t('globalManeNoticeTag', {}, lang))}</span>
+        <p>${esc(t('globalManeSubmitNotice', {}, lang))}</p>
+      </div>
+    </div>`;
+}
 
 function clearUploadPreview(host) {
   if (activeUploadPreviewUrl) {
@@ -1002,7 +1351,9 @@ function updateUploadPreviewMeta(host, file, extraMeta = '') {
   if (!host || !file) return;
   const metaEl = host.querySelector('.proof-upload-meta');
   if (!metaEl) return;
-  metaEl.textContent = `${file.name} · ${formatProofBytes(file.size)}${extraMeta ? ` · ${extraMeta}` : ''}（点击图片可放大）`;
+  const clickHint = L('Click image to zoom', '点击图片可放大');
+  const sizeText = formatProofBytes(file.size);
+  metaEl.textContent = `${file.name} · ${sizeText}${extraMeta ? ` · ${extraMeta}` : ''} (${clickHint})`;
 }
 
 function renderUploadPreview(host, file, extraMeta = '') {
@@ -1010,55 +1361,13 @@ function renderUploadPreview(host, file, extraMeta = '') {
   const mime = resolveProofMime(file);
   if (!host || !file || !mime || file.size > MAX_PROOF_RAW_BYTES) return;
   activeUploadPreviewUrl = URL.createObjectURL(file);
-  host.innerHTML = `<img src="${esc(activeUploadPreviewUrl)}" alt="已选截图预览" title="点击放大预览" /><span class="proof-upload-meta"></span>`;
+  const clickHint = L('Click image to zoom', '点击图片可放大');
+  host.innerHTML = `<img src="${esc(activeUploadPreviewUrl)}" alt="${esc(L('Screenshot preview', '已选截图预览'))}" title="${esc(clickHint)}" /><span class="proof-upload-meta"></span>`;
   updateUploadPreviewMeta(host, file, extraMeta);
   host.hidden = false;
 }
 
-async function runScreenshotSelection({ form, file, preview, note, analyzingLabel, recognizeFn }) {
-  form._preparedProof = null;
-  form._preparedProofPromise = null;
-  clearUploadPreview(preview);
-  if (!file || !file.size) {
-    note.textContent = '';
-    return null;
-  }
-  const mime = resolveProofMime(file);
-  if (!mime) {
-    note.textContent = '仅支持 PNG、JPG 或 WebP 格式截图。';
-    return null;
-  }
-  if (file.size > MAX_PROOF_RAW_BYTES) {
-    note.textContent = '截图文件超过 30 MB 上限，请先裁剪或压缩后再上传。';
-    return null;
-  }
-  renderUploadPreview(preview, file);
-  note.textContent = file.size > MAX_PROOF_UPLOAD_BYTES
-    ? `截图超过 5 MB，正在自动压缩并${analyzingLabel}…`
-    : `正在${analyzingLabel}…`;
-
-  const prepPromise = prepareProofForUpload(file);
-  form._preparedProofPromise = { sourceFile: file, promise: prepPromise };
-  const [prepOutcome, ocrOutcome] = await Promise.allSettled([prepPromise, recognizeFn(file)]);
-  return { prepOutcome, ocrOutcome };
-}
-
-function applyScreenshotPrepOutcome(form, preview, note, file, prepOutcome) {
-  if (prepOutcome.status === 'fulfilled') {
-    form._preparedProof = { sourceFile: file, ...prepOutcome.value };
-    if (prepOutcome.value.compressed) {
-      const tag = `已自动压缩至 ${formatProofBytes(prepOutcome.value.finalSize)}`;
-      updateUploadPreviewMeta(preview, file, tag);
-      return { ok: true, compSuffix: ` · ${tag}` };
-    }
-    return { ok: true, compSuffix: '' };
-  }
-  clearUploadPreview(preview);
-  note.textContent = prepOutcome.reason?.message || '截图文件大小不能超过 5 MB。';
-  return { ok: false, compSuffix: '' };
-}
-
-function openProofLightbox(src, alt = '截图放大预览') {
+function openProofLightbox(src, alt = L('Screenshot zoom preview', '截图放大预览')) {
   if (!src) return;
   closeProofLightbox();
   const overlay = document.createElement('div');
@@ -1066,7 +1375,7 @@ function openProofLightbox(src, alt = '截图放大预览') {
   overlay.className = 'proof-lightbox-overlay';
   overlay.setAttribute('role', 'dialog');
   overlay.setAttribute('aria-modal', 'true');
-  overlay.innerHTML = `<button type="button" class="proof-lightbox-close" data-action="close-lightbox" aria-label="关闭大图预览">×</button><img src="${esc(src)}" alt="${esc(alt)}" />`;
+  overlay.innerHTML = `<button type="button" class="proof-lightbox-close" data-action="close-lightbox" aria-label="${esc(t('btnClose'))}">×</button><img src="${esc(src)}" alt="${esc(alt)}" />`;
   overlay.addEventListener('click', (e) => {
     if (e.target === overlay || e.target.closest('[data-action="close-lightbox"]')) closeProofLightbox();
   });
@@ -1089,15 +1398,15 @@ function closeModal() {
 function decodeImageFile(blob) {
   return new Promise((resolve, reject) => {
     if (!blob?.size) {
-      reject(new Error('截图文件为空。'));
+      reject(new Error(L('Screenshot file is empty.', '截图文件为空。')));
       return;
     }
     const reader = new FileReader();
-    reader.onerror = () => reject(new Error('截图读取失败。'));
+    reader.onerror = () => reject(new Error(L('Failed to read screenshot file.', '截图读取失败。')));
     reader.onload = () => {
       const img = new Image();
       img.onload = () => resolve(img);
-      img.onerror = () => reject(new Error('截图无法解码，请检查图片是否损坏。'));
+      img.onerror = () => reject(new Error(L('Screenshot could not be decoded. Please check the image file.', '截图无法解码，请检查图片是否损坏。')));
       img.src = reader.result;
     };
     reader.readAsDataURL(blob);
@@ -1110,10 +1419,11 @@ async function checked(promise) {
   return data;
 }
 
-async function loadPages(table, orderKeys, select = '*') {
+async function loadPages(table, orderKeys, select = '*', applyFilters = null) {
   const rows = [];
   for (let from = 0; ; from += 500) {
     let q = sb.from(table).select(select);
+    if (applyFilters) q = applyFilters(q);
     for (const k of orderKeys) q = q.order(k);
     const page = await checked(q.range(from, from + 499));
     rows.push(...(page || []));
@@ -1121,7 +1431,7 @@ async function loadPages(table, orderKeys, select = '*') {
   }
 }
 
-/* ==================== 排序与数据辅助 ==================== */
+/* ==================== Sorting & Data Helpers ==================== */
 function compareManeScore(a, b) {
   const sa = BigInt(a.score || 0);
   const sbVal = BigInt(b.score || 0);
@@ -1131,7 +1441,7 @@ function compareManeScore(a, b) {
 
 function compareFlashbackRecord(a, b) {
   return (
-    (a.rounds - b.rounds) ||
+    (Number(a.rounds) - Number(b.rounds)) ||
     (Date.parse(a.created_at) - Date.parse(b.created_at)) ||
     String(a.id).localeCompare(String(b.id))
   );
@@ -1160,7 +1470,7 @@ function challengeOccurrences(stage) {
   return state.fbStages.filter((s) => s.challenge_id === stage.challenge_id).length;
 }
 
-/* ==================== URL 路由与直达深链同步 ==================== */
+/* ==================== URL Routing & Deep Links ==================== */
 function readHash() {
   const raw = (location.hash || '').replace(/^#/, '');
   if (!raw) return;
@@ -1223,7 +1533,6 @@ function readHash() {
 }
 
 function writeHash() {
-  // 首次加载数据尚未就绪时暂不重写哈希，避免覆盖传入深链参数
   if (state.loading && !state.maneMaps.length && !state.fbVersions.length) return;
   const page = state.mode === 'mane' ? state.manePage : state.fbPage;
   const params = new URLSearchParams();
@@ -1270,12 +1579,26 @@ function writeHash() {
   const qs = params.toString();
   const next = `#${state.mode}/${page}${qs ? `?${qs}` : ''}`;
   if (location.hash !== next) {
-    history.replaceState(null, '', next);
+    try {
+      history.replaceState(null, '', `${location.search || ''}${next}`);
+    } catch {}
+  }
+}
+
+function updateUrlLangParam(lang) {
+  try {
+    const url = new URL(location.href);
+    url.searchParams.set('lang', lang);
+    history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+  } catch {
+    // Ignore on restricted file:// histories
   }
 }
 
 function buildRecordDeepLink(item) {
-  const base = `${location.origin}${location.pathname}`;
+  const lang = getLang();
+  const originPart = location.origin && location.origin !== 'null' ? location.origin : '';
+  const base = `${originPart}${location.pathname}?lang=${encodeURIComponent(lang)}`;
   if (item.mode === 'mane') {
     if (!item.rank && item.dailyDate) {
       const p = new URLSearchParams({ date: item.dailyDate });
@@ -1300,8 +1623,55 @@ function buildRecordDeepLink(item) {
   return `${base}#flashback/leaderboard?${p.toString()}`;
 }
 
-/* ==================== 实时加载双榜数据 ==================== */
-async function loadAllData() {
+/* ==================== Optional Live Supabase Sync ==================== */
+async function ensureSupabaseClient() {
+  if (sb) return sb;
+  const cfg = window.LEADERBOARD_CONFIG;
+  if (!cfg?.supabaseUrl || !cfg?.supabaseAnonKey) {
+    throw new Error(L('Missing Supabase configuration in config.js.', '缺少 config.js 后端配置。'));
+  }
+  const dynamicImport = new Function('u', 'return import(u)');
+  const { createClient } = await dynamicImport('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm');
+  sb = createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
+  if (!authBound) {
+    authBound = true;
+    sb.auth.onAuthStateChange((_ev, nextSession) => {
+      setTimeout(() => syncAuth(nextSession).catch(() => {}), 0);
+    });
+  }
+  return sb;
+}
+
+async function syncLiveArchive({ silent = false } = {}) {
+  if (state.syncingLive) return;
+  state.syncingLive = true;
+  renderChrome();
+  try {
+    await ensureSupabaseClient();
+    await Promise.all([loadAllData({ keepOfflineOnFail: true }), syncAuth()]);
+    if (state.dataSource === 'live' && !silent) {
+      toast(t('offlineSyncOk'));
+    }
+  } catch (err) {
+    console.warn('Live sync failed, continuing with offline snapshot:', err);
+    if (!state.maneMaps.length) hydrateFromOfflineSnapshot();
+    state.dataSource = 'offline';
+    state.connected = true;
+    state.loading = false;
+    state.errorNotice = '';
+    if (!silent) toast(t('offlineSyncFail'));
+  } finally {
+    state.syncingLive = false;
+    render();
+  }
+}
+
+async function loadAllData({ keepOfflineOnFail = false } = {}) {
+  if (state.dataSource === 'offline' && !sb) {
+    hydrateFromOfflineSnapshot();
+    render();
+    return;
+  }
   await reviewedBoardRefresh;
   const coveredBoards = [...reviewedBoards];
   reviewedBoards.clear();
@@ -1325,53 +1695,39 @@ async function loadAllData() {
     ]);
 
     state.maneMaps = (maneMaps || []).sort((a, b) =>
-      String(b.edition).localeCompare(String(a.edition), 'zh-CN', { numeric: true }) ||
+      String(b.edition).localeCompare(String(a.edition), 'en', { numeric: true }) ||
       (a.position - b.position) ||
       String(a.name).localeCompare(String(b.name), 'zh-CN')
     );
     Object.assign(state, maneData, flashbackData);
 
     state.fbVersions = (fbVersions || []).sort((a, b) =>
-      String(b.code).localeCompare(String(a.code), 'zh-CN', { numeric: true }) ||
+      String(b.code).localeCompare(String(a.code), 'en', { numeric: true }) ||
       (Date.parse(b.created_at) - Date.parse(a.created_at))
     );
     state.fbStages = fbStages || [];
     state.fbArchives = fbArchives || [];
 
-    if (state.maneMapId) {
-      const matchedMap = state.maneMaps.find((m) => m.id === state.maneMapId);
-      if (matchedMap && matchedMap.section !== state.maneSection) {
-        state.maneSection = matchedMap.section;
-      }
-    }
-    const maps = activeManeMaps();
-    if (!maps.some((m) => m.id === state.maneMapId)) state.maneMapId = maps[0]?.id || '';
-
-    if (state.fbStageId) {
-      const matchedStage = state.fbStages.find((s) => s.id === state.fbStageId);
-      if (matchedStage && matchedStage.version_id !== state.fbVersionId) {
-        state.fbVersionId = matchedStage.version_id;
-      }
-    }
-    if (!state.fbVersions.some((v) => v.id === state.fbVersionId)) {
-      state.fbVersionId = state.fbVersions[0]?.id || '';
-    }
-    const stages = standardStages(state.fbVersionId);
-    if (!stages.some((s) => s.id === state.fbStageId)) {
-      state.fbStageId = stages[0]?.id || '';
-    }
-
+    syncActiveSelectionsAfterLoad();
+    state.dataSource = 'live';
     state.connected = true;
     state.errorNotice = '';
   } catch (err) {
     coveredBoards.forEach((board) => { reviewedBoards.add(board); });
     console.error(err);
+    if (keepOfflineOnFail) {
+      if (!state.maneMaps.length) hydrateFromOfflineSnapshot();
+      state.dataSource = 'offline';
+      state.connected = true;
+      state.errorNotice = '';
+      throw err;
+    }
     state.connected = false;
-    state.errorNotice = '暂时无法连接实时榜单档案库，请检查网络后点击重试。';
+    state.errorNotice = t('offlineSyncFail');
   } finally {
     state.loading = false;
     render();
-    if (state.connected) void refreshReviewedBoards();
+    if (state.connected && state.dataSource === 'live') void refreshReviewedBoards();
   }
 }
 
@@ -1380,22 +1736,37 @@ let reviewedBoardRefresh = null;
 
 async function fetchPublicBoardData(board) {
   if (board === 'mane') {
-    const [maneScores, maneTotals] = await Promise.all([
+    const [maneScores, maneTotals, maneDailyScores] = await Promise.all([
       loadPages('mane_leaderboard', ['id']),
-      loadPages('mane_carry_total_leaderboard', ['section', 'edition', 'division', 'carry_key'])
+      loadPages('mane_carry_total_leaderboard', ['section', 'edition', 'division', 'carry_key']),
+      loadPages('mane_daily_scores', ['id'], 'id,map_id,division,display_name,carry,team,score,approved_at,related_url')
     ]);
-    return {maneScores, maneTotals};
+    return { maneScores, maneTotals, maneDailyScores };
   }
 
-  const [fbRecords, fbPlayers, fbCarries] = await Promise.all([
+  const [fbRecords, fbPlayers, fbCarries, fbSubmissionsRaw, fbProfiles] = await Promise.all([
     loadPages('leaderboard_records', ['id']),
     loadPages('flashback_player_rankings_by_scope', ['version_id', 'player_id']),
-    loadPages('carry_rankings_by_scope', ['version_id', 'carry_name'], 'version_id,carry_name,challenge_count')
+    loadPages('carry_rankings_by_scope', ['version_id', 'carry_name'], 'version_id,carry_name,challenge_count'),
+    loadPages(
+      'submissions',
+      ['id'],
+      'id,player_id,stage_id,group_code,team,carry_name,rounds,created_at,credited_player',
+      (q) => q.eq('status', 'approved').is('archived_at', null)
+    ),
+    loadPages('profiles', ['id'], 'id,display_name')
   ]);
-  return {fbRecords, fbPlayers, fbCarries};
+  const profileNameById = new Map((fbProfiles || []).map((p) => [p.id, p.display_name]));
+  const fbRecordNameById = new Map((fbRecords || []).map((r) => [r.id, r.display_name]));
+  const fbApprovedRecords = (fbSubmissionsRaw || []).map((row) => ({
+    ...row,
+    display_name: row.credited_player || profileNameById.get(row.player_id) || fbRecordNameById.get(row.id) || ''
+  }));
+  return { fbRecords, fbPlayers, fbCarries, fbApprovedRecords };
 }
 
 function refreshReviewedBoards() {
+  if (!sb || state.dataSource !== 'live') return;
   if (reviewedBoardRefresh || !reviewedBoards.size || state.loading || $('#modalOverlay')) return;
   const boards = [...reviewedBoards];
   reviewedBoards.clear();
@@ -1417,6 +1788,7 @@ function refreshReviewedBoards() {
 }
 
 async function syncAuth(sessionInput) {
+  if (!sb) return;
   try {
     let session = sessionInput;
     if (session === undefined) {
@@ -1442,15 +1814,15 @@ async function syncAuth(sessionInput) {
   renderChrome();
 }
 
-/* ==================== 视觉组件：实机风编队阵容卡（对齐 game-mane-team.png + 官方 .sl-lineup_item） ==================== */
-function igHeading(cn, en, right = '') {
+/* ==================== Visual Components (UTTU Cards, Psychube Dock, Medals, Meta Widget) ==================== */
+function igHeading(primary, secondary, right = '') {
   return `
     <div class="ig-heading">
       <span class="ig-heading-left">
         <span class="ig-tri" aria-hidden="true">▶</span>
-        <span class="ig-cn">${esc(cn)}</span>
+        <span class="ig-cn">${esc(primary)}</span>
         <span class="ig-bar" aria-hidden="true"></span>
-        <span class="ig-en">${esc(en)}</span>
+        <span class="ig-en">${esc(secondary)}</span>
       </span>
       ${right ? `<span class="ig-right">${esc(right)}</span>` : ''}
     </div>`;
@@ -1465,10 +1837,6 @@ function isLegacyShorthandTeam(team) {
   );
 }
 
-function formatCanonicalCarry(carryStr) {
-  return splitCarries(carryStr).map(canonicalDisplayName).join(' / ');
-}
-
 function matchesAfflatus(rawName, targetAff) {
   if (!targetAff) return true;
   const aff = resolveAfflatus(rawName);
@@ -1477,13 +1845,9 @@ function matchesAfflatus(rawName, targetAff) {
   return false;
 }
 
-function cleanStageDisplayName(name) {
-  const cleaned = String(name ?? '').replace(/^[ⅠⅡⅢⅣⅤⅥⅦⅧⅨⅩ\d]+\s*[·．.\-]\s*/, '').trim();
-  return cleaned || String(name ?? '');
-}
-
-function collectBoardCharacters(records, roleMode, getCarryStr) {
-  const map = new Map(); // canonicalKey -> { label, count }
+function collectBoardCharacters(records, roleMode, getCarryStr, lang = getLang()) {
+  const locale = isEn(lang) ? 'en' : 'zh-CN';
+  const map = new Map();
   for (const row of records) {
     const names = roleMode === 'member'
       ? extractLineupCharacterNames(row.team, getCarryStr(row))
@@ -1494,136 +1858,221 @@ function collectBoardCharacters(records, roleMode, getCarryStr) {
       const key = canonicalCharacterKey(raw);
       if (!key || seenInRow.has(key)) continue;
       seenInRow.add(key);
-      const label = canonicalDisplayName(raw);
+      const label = displayCharacterName(raw, lang);
+      const char = resolveCharacter(raw);
       const cur = map.get(key);
       if (cur) cur.count += 1;
-      else map.set(key, { label, count: 1 });
+      else map.set(key, { label, count: 1, portrait: char?.portrait || '', char });
     }
   }
   return [...map.entries()].sort((a, b) =>
     (b[1].count - a[1].count) ||
-    a[1].label.localeCompare(b[1].label, 'zh-CN')
+    a[1].label.localeCompare(b[1].label, locale)
   );
 }
 
-function renderAfflatusFilterHtml(selectedAff, dataAttr) {
+function renderSidebarMetaWidget(records, getCarryStr, activeCarryKey, mode, lang = getLang()) {
+  const carries = collectBoardCharacters(records, 'carry', getCarryStr, lang).slice(0, 4);
+  if (!carries.length) {
+    return `
+      <div class="sidebar-meta-widget">
+        ${igHeading(t('headingTopCarries', {}, lang), t('headingTopCarriesEn', {}, lang), L('RUNS', '出场次数', lang))}
+        <p class="sidebar-note" style="margin:0">${esc(t('topCarriesEmpty', {}, lang))}</p>
+      </div>`;
+  }
   return `
-    <div class="aff-filter-row" role="group" aria-label="按灵感快速筛选">
+    <div class="sidebar-meta-widget">
+      ${igHeading(t('headingTopCarries', {}, lang), t('headingTopCarriesEn', {}, lang), L('RUNS', '出场次数', lang))}
+      <div class="meta-carry-list">
+        ${carries.map(([key, info]) => {
+          const active = activeCarryKey === key;
+          const runText = isEn(lang) ? (info.count === 1 ? '1 run' : `${info.count} runs`) : `${info.count} 次`;
+          return `
+            <button type="button" class="meta-carry-row ${active ? 'active' : ''}" data-meta-carry="${esc(key)}" data-meta-mode="${esc(mode)}" title="${esc(info.label)} · ${esc(formatEntries(info.count, lang))}">
+              <span class="meta-carry-avatar">
+                ${info.portrait
+                  ? `<img src="${esc(info.portrait)}" alt="${esc(info.label)}" loading="eager" decoding="async" />`
+                  : `<span class="char-slot-mono">${esc(characterMonogram(info.label))}</span>`}
+              </span>
+              <span class="meta-carry-info">
+                <span class="meta-carry-top">
+                  <span class="meta-carry-name">${esc(info.label)}</span>
+                  <span class="meta-carry-count">${esc(runText)}</span>
+                </span>
+              </span>
+            </button>`;
+        }).join('')}
+      </div>
+    </div>`;
+}
+
+function renderAfflatusFilterHtml(selectedAff, dataAttr, lang = getLang()) {
+  return `
+    <div class="aff-filter-row" role="group" aria-label="${esc(t('afflatusFilterAria', {}, lang))}">
       ${FILTER_AFFLATUS.map((affKey) => {
         const meta = AFFLATUS_META[affKey];
+        const affLabel = localizeAfflatus(affKey, lang);
         const active = selectedAff === affKey;
         return `
-          <button type="button" class="aff-filter-btn ${active ? 'active' : ''}" ${dataAttr}="${affKey}" aria-pressed="${active}" title="仅看${meta.label}灵感">
+          <button type="button" class="aff-filter-btn ${active ? 'active' : ''}" ${dataAttr}="${affKey}" aria-pressed="${active}" title="${esc(t('afflatusOnlyTitle', { aff: affLabel }, lang))}">
             <img src="${esc(meta.icon)}" alt="" aria-hidden="true" />
-            <span>${esc(meta.label)}</span>
+            <span>${esc(affLabel)}</span>
           </button>`;
       }).join('')}
     </div>`;
 }
 
-function renderFormationHtml(team, carryStr) {
+function renderSlotPsychubeDockHtml(rawPsy, lang = getLang()) {
+  const val = String(rawPsy ?? '').trim();
+  if (!val) return '';
+  const psy = resolvePsychube(val);
+  const pName = displayPsychubeName(psy || val, lang);
+  const openAttr = `data-open-psy="${esc(psy ? psy.id : val)}" role="button" tabindex="0"`;
+  if (!psy) {
+    return `
+      <div class="slot-psy-dock is-clickable" ${openAttr} aria-label="${esc(pName)}">
+        <span class="slot-psy-frame"><span>✦</span></span>
+        <span class="slot-psy-tooltip">${esc(pName)}</span>
+      </div>`;
+  }
+  const pStat = displayPsychubeStat(psy, lang);
+  return `
+    <div class="slot-psy-dock is-clickable" ${openAttr} aria-label="${esc(pName)}">
+      <span class="slot-psy-frame">
+        <img class="slot-psy-bg" src="${esc(psychubeFrameSrc(psy.star))}" alt="" aria-hidden="true" loading="eager" decoding="async" />
+        <img class="slot-psy-icon" src="${esc(psychubeIconSrc(psy.id))}" alt="${esc(pName)}" loading="eager" decoding="async" />
+      </span>
+      <span class="slot-psy-tooltip">${esc(pName)} · ${psy.star}★ ${esc(pStat)}</span>
+    </div>`;
+}
+
+function renderFormationHtml(team, carryStr, psychubes = [], lang = getLang()) {
   const slots = parseLineupSlots(team, carryStr);
   if (!slots.length) return '';
 
   if (slots.length === 1 && slots[0].type === 'legacy') {
-    return `<div class="legacy-team-ribbon"><small>原表配队</small><span>${esc(slots[0].raw)}</span></div>`;
+    return `<div class="legacy-team-ribbon"><small>${esc(t('legacyTeamLabel', {}, lang))}</small><span>${esc(slots[0].raw)}</span></div>`;
   }
 
   const carrySet = new Set(splitCarries(carryStr).map(canonicalCharacterKey));
-  return `<div class="formation-strip">${slots.map((slot) => {
+  const psyList = Array.isArray(psychubes) ? psychubes : [];
+  const mainTag = isEn(lang) ? 'MAIN' : '主C';
+
+  return `<div class="formation-strip">${slots.map((slot, idx) => {
+    const psyDock = renderSlotPsychubeDockHtml(psyList[idx], lang);
+
     if (slot.type === 'flex') {
       const pics = slot.chars.slice(0, 4);
       const gridClass = pics.length <= 2 ? 'cols-2' : pics.length === 3 ? 'cols-3' : 'cols-4';
-      const fullListText = slot.chars.map((c) => c.name).join(' / ');
+      const fmt = formatFlexSlot(slot, lang);
       return `
-        <div class="formation-slot is-flex has-portrait" title="可选替换位（${esc(slot.tag)}）：${esc(fullListText)}（原填：${esc(slot.raw)}）">
-          <div class="slot-flex-collage ${gridClass}">
-            ${pics.map((c) => `<img src="${esc(c.portrait)}" alt="${esc(c.name)}" loading="lazy" decoding="async" />`).join('')}
+        <div class="formation-unit">
+          <div class="formation-slot is-flex has-portrait" title="${esc(fmt.title)}">
+            <div class="slot-flex-collage ${gridClass}">
+              ${pics.map((c) => `<img src="${esc(c.portrait)}" alt="${esc(displayCharacterName(c.name, lang))}" loading="eager" decoding="async" />`).join('')}
+            </div>
+            <div class="slot-vignette" aria-hidden="true"></div>
+            <span class="slot-flex-tag">${esc(fmt.tag)}</span>
+            <div class="slot-namebar">${esc(fmt.label)}</div>
           </div>
-          <div class="slot-vignette" aria-hidden="true"></div>
-          <span class="slot-flex-tag">${esc(slot.tag)}</span>
-          <div class="slot-namebar">${esc(slot.label)}</div>
+          ${psyDock}
         </div>`;
     }
 
     if (slot.type === 'wild') {
+      const fmt = formatWildSlot(slot, lang);
       return `
-        <div class="formation-slot is-wild" title="自由补位：${esc(slot.raw)}">
-          <img class="slot-card-bg" src="./assets/uttu/bg_kapaidi.png" alt="" aria-hidden="true" loading="lazy" decoding="async" />
-          <div class="slot-wild-body" aria-hidden="true">
-            <span class="slot-wild-glyph">✦</span>
-            <span class="slot-wild-sub">自由位</span>
+        <div class="formation-unit">
+          <div class="formation-slot is-wild" title="${esc(fmt.title)}">
+            <img class="slot-card-bg" src="./assets/uttu/bg_kapaidi.png" alt="" aria-hidden="true" loading="eager" decoding="async" />
+            <div class="slot-wild-body" aria-hidden="true">
+              <span class="slot-wild-glyph">✦</span>
+              <span class="slot-wild-sub">${esc(fmt.sub)}</span>
+            </div>
+            <div class="slot-namebar">${esc(fmt.label)}</div>
           </div>
-          <div class="slot-namebar">${esc(slot.label)}</div>
+          ${psyDock}
         </div>`;
     }
 
     const rawName = slot.raw || '';
     const char = slot.char || resolveCharacter(rawName);
-    const displayName = char?.name || canonicalDisplayName(rawName);
+    const displayName = char ? displayCharacterName(char.name, lang) : displayCharacterName(rawName, lang);
     const affKey = char?.aff || resolveAfflatus(rawName);
     const aff = AFFLATUS_META[affKey] || AFFLATUS_META.unknown;
+    const affDisplay = localizeAfflatus(affKey, lang);
     const isCarry = carrySet.has(char ? `char:${char.id}` : canonicalCharacterKey(rawName));
     const mono = characterMonogram(displayName);
     const hasPortrait = Boolean(char?.portrait);
     const raritySrc = rarityOverlaySrc(char?.star || 6);
     const affHtml = aff.icon
-      ? `<img class="slot-aff-img" src="${esc(aff.icon)}" alt="${esc(aff.label)}" loading="lazy" decoding="async" />`
-      : `<span class="slot-ribbon" style="background:${aff.ribbon}" aria-label="${esc(aff.label)}">${afflatusSvg(affKey)}</span>`;
-    const rawNote = rawName && rawName.trim() !== displayName ? `（原填：${rawName}）` : '';
+      ? `<img class="slot-aff-img" src="${esc(aff.icon)}" alt="${esc(affDisplay)}" loading="eager" decoding="async" />`
+      : `<span class="slot-ribbon" style="background:${aff.ribbon}" aria-label="${esc(affDisplay)}">${afflatusSvg(affKey)}</span>`;
+    const tooltip = [
+      displayName,
+      affKey !== 'unknown' ? affDisplay : '',
+      char?.star ? `${char.star}★` : '',
+      isCarry ? t('mainDpsLabel', {}, lang) : ''
+    ].filter(Boolean).join(' · ');
 
     return `
-      <div class="formation-slot ${isCarry ? 'is-carry' : ''} ${hasPortrait ? 'has-portrait' : ''}" title="${esc(displayName)}${esc(rawNote)}${affKey !== 'unknown' ? ` · ${aff.label}灵感` : ''}${char?.star ? ` · ${char.star}★` : ''}${isCarry ? ' · 主C' : ''}">
-        <img class="slot-card-bg" src="./assets/uttu/bg_kapaidi.png" alt="" aria-hidden="true" loading="lazy" decoding="async" />
-        <div class="slot-center" aria-hidden="true">
-          ${insightWatermarkSvg()}
-          <span class="slot-monogram">${esc(mono)}</span>
+      <div class="formation-unit">
+        <div class="formation-slot is-clickable ${isCarry ? 'is-carry' : ''} ${hasPortrait ? 'has-portrait' : ''}" data-open-char="${esc(char ? char.name : rawName)}" role="button" tabindex="0" title="${esc(tooltip)}">
+          <img class="slot-card-bg" src="./assets/uttu/bg_kapaidi.png" alt="" aria-hidden="true" loading="eager" decoding="async" />
+          <div class="slot-center" aria-hidden="true">
+            ${insightWatermarkSvg()}
+            <span class="slot-monogram">${esc(mono)}</span>
+          </div>
+          ${hasPortrait ? `<img class="slot-portrait" src="${esc(char.portrait)}" alt="${esc(displayName)}" loading="eager" decoding="async" onerror="this.closest('.formation-slot')?.classList.remove('has-portrait');this.remove()" />` : ''}
+          <img class="slot-rarity-layer" src="${esc(raritySrc)}" alt="" aria-hidden="true" loading="eager" decoding="async" />
+          <div class="slot-vignette" aria-hidden="true"></div>
+          ${affHtml}
+          ${isCarry ? `<span class="slot-carry-tag">${esc(mainTag)}</span>` : ''}
+          <div class="slot-namebar">${esc(displayName)}</div>
         </div>
-        ${hasPortrait ? `<img class="slot-portrait" src="${esc(char.portrait)}" alt="${esc(displayName)}" loading="lazy" decoding="async" onerror="this.closest('.formation-slot')?.classList.remove('has-portrait');this.remove()" />` : ''}
-        <img class="slot-rarity-layer" src="${esc(raritySrc)}" alt="" aria-hidden="true" loading="lazy" decoding="async" />
-        <div class="slot-vignette" aria-hidden="true"></div>
-        ${affHtml}
-        ${isCarry ? '<span class="slot-carry-tag">主C</span>' : ''}
-        <div class="slot-namebar">${esc(displayName)}</div>
+        ${psyDock}
       </div>`;
   }).join('')}</div>`;
 }
 
-function renderCarryAvatarHtml(carryName) {
+function renderCarryAvatarHtml(carryName, lang = getLang()) {
   const char = resolveCharacter(carryName);
-  const displayName = canonicalDisplayName(carryName);
+  const displayName = displayCharacterName(carryName, lang);
   const affKey = char?.aff || resolveAfflatus(carryName);
   const aff = AFFLATUS_META[affKey] || AFFLATUS_META.unknown;
+  const affDisplay = localizeAfflatus(affKey, lang);
   if (char?.portrait) {
     return `
-      <span class="carry-avatar" title="${esc(displayName)} · ${aff.label}灵感">
-        <img class="carry-avatar-pic" src="${esc(char.portrait)}" alt="${esc(displayName)}" loading="lazy" decoding="async" onerror="this.remove()" />
-        <img class="carry-avatar-rar" src="${esc(rarityOverlaySrc(char.star || 6))}" alt="" aria-hidden="true" loading="lazy" />
+      <span class="carry-avatar" title="${esc(displayName)} · ${esc(affDisplay)}">
+        <img class="carry-avatar-pic" src="${esc(char.portrait)}" alt="${esc(displayName)}" loading="eager" decoding="async" onerror="this.remove()" />
+        <img class="carry-avatar-rar" src="${esc(rarityOverlaySrc(char.star || 6))}" alt="" aria-hidden="true" loading="eager" />
         ${aff.icon
-          ? `<img class="carry-avatar-aff-img" src="${esc(aff.icon)}" alt="${esc(aff.label)}" loading="lazy" />`
+          ? `<img class="carry-avatar-aff-img" src="${esc(aff.icon)}" alt="${esc(affDisplay)}" loading="eager" />`
           : `<span class="carry-avatar-aff" style="background:${aff.ribbon}">${afflatusSvg(affKey)}</span>`}
       </span>`;
   }
   return `<span class="inline-aff-dot" style="background:${aff.ribbon}">${afflatusSvg(affKey)}</span>`;
 }
 
-function renderRankBadge(rank) {
-  if (rank === 1) return '<span class="rank-badge medal r1" aria-label="第 1 名">Ⅰ</span>';
-  if (rank === 2) return '<span class="rank-badge medal r2" aria-label="第 2 名">Ⅱ</span>';
-  if (rank === 3) return '<span class="rank-badge medal r3" aria-label="第 3 名">Ⅲ</span>';
-  return `<span class="rank-badge">${String(rank).padStart(2, '0')}</span>`;
+function renderRankBadge(rank, lang = getLang()) {
+  const aria = t('rankAria', { rank }, lang);
+  if (rank === 1 || rank === 2 || rank === 3) {
+    return `<span class="rank-badge medal r${rank} has-official-badge" aria-label="${esc(aria)}"><img class="rank-badge-img" src="./assets/official/ranking-${rank}.png" alt="#${rank}" loading="eager" decoding="async" /></span>`;
+  }
+  return `<span class="rank-badge" aria-label="${esc(aria)}">${String(rank).padStart(2, '0')}</span>`;
 }
 
-function renderGradeStamp(score) {
-  const g = resolveManeGrade(score);
+function renderGradeStamp(score, lang = getLang()) {
+  const g = resolveManeGrade(score, lang);
+  const titleText = `${g.subGrade || g.grade}${g.tag ? ` · ${g.tag}` : ''}`;
   if (g.img) {
     return `
-      <span class="grade-badge-wrap ${g.tier}" title="调查评级 ${g.grade}${g.tag ? ' · ' + g.tag : ''}">
-        <img class="grade-badge-img" src="${esc(g.img)}" alt="${esc(g.grade)}" loading="eager" decoding="async" />
+      <span class="grade-badge-wrap ${g.tier}" title="${esc(titleText)}">
+        <img class="grade-badge-img" src="${esc(g.img)}" alt="${esc(g.subGrade || g.grade)}" loading="eager" decoding="async" />
         ${g.tag ? `<span class="grade-mythic-pill">${esc(g.tag)}</span>` : ''}
       </span>`;
   }
-  return `<span class="grade-crest ${g.tier}"><span>${g.grade}</span></span>`;
+  return `<span class="grade-crest ${g.tier}" title="${esc(titleText)}"><span>${esc(g.grade)}</span></span>`;
 }
 
 function findManeSitewidePeak() {
@@ -1655,11 +2104,32 @@ function findFlashbackSitewidePeak() {
   return best;
 }
 
-/* ==================== 顶部栏与紧凑刊头（含可跳转全站指标，首屏直达前三名） ==================== */
+/* ==================== Topbar Chrome, Footer & Magazine Masthead ==================== */
 function renderChrome() {
+  const lang = getLang();
+  const en = isEn(lang);
+  const issue = localizeIssueMeta(window.LEADERBOARD_CONFIG?.issueMeta, lang);
+
   document.body.dataset.mode = state.mode;
-  $('#brandGlyph').textContent = state.mode === 'mane' ? '邮' : 'Ⅸ';
-  $('#brandTitle').textContent = state.mode === 'mane' ? '鬃毛邮报 · 调查总榜' : '焦点闪回 · 纪录档案';
+  document.body.dataset.lang = lang;
+  document.documentElement.lang = en ? 'en' : 'zh-CN';
+  document.title = state.mode === 'mane' ? t('pageTitleMane', {}, lang) : t('pageTitleFb', {}, lang);
+
+  const brandLink = $('#brandHomeLink');
+  if (brandLink) brandLink.setAttribute('aria-label', t('brandHomeAria', {}, lang));
+  const glyphEl = $('#brandGlyph');
+  if (glyphEl) glyphEl.textContent = state.mode === 'mane' ? t('brandGlyphMane', {}, lang) : t('brandGlyphFb', {}, lang);
+  const titleEl = $('#brandTitle');
+  if (titleEl) titleEl.textContent = state.mode === 'mane' ? t('brandTitleMane', {}, lang) : t('brandTitleFb', {}, lang);
+  const subEl = $('#brandSub');
+  if (subEl) subEl.textContent = t('brandSub', {}, lang);
+
+  const modeSwitcher = $('#modeSwitcher');
+  if (modeSwitcher) modeSwitcher.setAttribute('aria-label', t('modeSwitcherAria', {}, lang));
+  const modeManeLabel = $('#modeManeLabel');
+  if (modeManeLabel) modeManeLabel.textContent = t('modeMane', {}, lang);
+  const modeFbLabel = $('#modeFbLabel');
+  if (modeFbLabel) modeFbLabel.textContent = t('modeFlashback', {}, lang);
 
   document.querySelectorAll('[data-mode-switch]').forEach((btn) => {
     const active = btn.dataset.modeSwitch === state.mode;
@@ -1667,312 +2137,1473 @@ function renderChrome() {
     btn.setAttribute('aria-selected', String(active));
   });
 
+  document.querySelectorAll('[data-set-lang]').forEach((btn) => {
+    const active = btn.dataset.setLang === lang;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-pressed', String(active));
+  });
+
   const badge = $('#connectionBadge');
   const connText = $('#connectionText');
-  badge.classList.toggle('online', state.connected);
-  badge.classList.toggle('offline', !state.connected && !state.loading);
-  if (state.loading) connText.textContent = '同步档案库…';
-  else if (state.connected) connText.textContent = '实时档案 · 投稿开放';
-  else connText.textContent = '暂未连接';
+  if (badge && connText) {
+    const isOffline = state.dataSource === 'offline';
+    badge.classList.toggle('is-offline-archive', isOffline && !state.syncingLive);
+    badge.classList.toggle('online', !isOffline && state.connected && !state.syncingLive);
+    badge.classList.toggle('offline', !state.connected && !state.loading && !state.syncingLive);
+    if (state.syncingLive || state.loading) {
+      connText.textContent = t('statusSyncing', {}, lang);
+    } else if (isOffline) {
+      connText.textContent = L(`Offline Archive · v${issue.version}`, `离线档案 · v${issue.version}`, lang);
+    } else if (state.connected) {
+      connText.textContent = t('statusLive', {}, lang);
+    } else {
+      connText.textContent = t('statusDisconnected', {}, lang);
+    }
+  }
+
+  const syncBtn = $('#syncLiveBtn');
+  if (syncBtn) {
+    syncBtn.hidden = state.dataSource === 'live';
+    syncBtn.disabled = state.syncingLive;
+    syncBtn.textContent = state.syncingLive ? t('statusSyncing', {}, lang) : `${t('btnSyncLive', {}, lang)} ↻`;
+  }
 
   const canSubmitMane = state.connected && state.maneMaps.some(isMapOpen);
   const canSubmitFb = state.connected && state.fbStages.length > 0;
   const submitBtn = $('#submitBtn');
-  submitBtn.disabled = state.mode === 'mane' ? !canSubmitMane : !canSubmitFb;
+  if (submitBtn) {
+    submitBtn.disabled = state.mode === 'mane' ? !canSubmitMane : !canSubmitFb;
+    const submitMain = $('#submitBtnMain');
+    const submitSub = $('#submitBtnSub');
+    if (submitMain) {
+      submitMain.innerHTML = en
+        ? `+ Submit<span class="cta-ext"> Record</span>`
+        : `＋ 投稿<span class="cta-ext">成绩</span>`;
+    }
+    if (submitSub) {
+      submitSub.textContent = state.mode === 'mane' ? t('ctaSubMane', {}, lang) : t('ctaSubFb', {}, lang);
+    }
+  }
 
   const adminBtn = $('#adminCenterBtn');
-  adminBtn.hidden = !state.isAdmin;
+  if (adminBtn) {
+    adminBtn.hidden = !state.isAdmin;
+    adminBtn.innerHTML = `<span class="acc-full">${esc(t('btnAdmin', {}, lang))}</span><span class="acc-short">${esc(t('btnAdminShort', {}, lang))}</span>`;
+  }
+
+  const mySubBtn = $('#mySubmissionsBtn');
+  if (mySubBtn) {
+    mySubBtn.innerHTML = `<span class="acc-full">${esc(t('btnMySubmissions', {}, lang))}</span><span class="acc-short">${esc(t('btnMySubmissionsShort', {}, lang))}</span>`;
+  }
 
   const accBtn = $('#accountBtn');
-  let accFull = '管理员登录';
-  let accShort = '登录';
-  if (state.isAdmin) {
-    accFull = '管理员账号';
-    accShort = '管理';
-  } else if (state.profile?.display_name) {
-    accFull = state.profile.display_name;
-    accShort = state.profile.display_name.slice(0, 4);
-  } else if (state.user && !state.user.is_anonymous) {
-    accFull = '站内账号';
-    accShort = '账号';
+  if (accBtn) {
+    let accFull = t('btnAdminLogin', {}, lang);
+    let accShort = t('btnAdminLoginShort', {}, lang);
+    if (state.isAdmin) {
+      accFull = t('accountAdmin', {}, lang);
+      accShort = t('accountAdminShort', {}, lang);
+    } else if (state.profile?.display_name) {
+      accFull = state.profile.display_name;
+      accShort = state.profile.display_name.slice(0, 6);
+    } else if (state.user && !state.user.is_anonymous) {
+      accFull = t('accountUser', {}, lang);
+      accShort = t('accountUserShort', {}, lang);
+    }
+    accBtn.innerHTML = `<span class="acc-full">${esc(accFull)}</span><span class="acc-short">${esc(accShort)}</span>`;
   }
-  accBtn.innerHTML = `<span class="acc-full">${esc(accFull)}</span><span class="acc-short">${esc(accShort)}</span>`;
 
-  // 次级导航
+  // Secondary Navigation
+  const subnavBar = $('#subnavBar');
+  if (subnavBar) subnavBar.setAttribute('aria-label', t('subnavAria', {}, lang));
   const tabs = state.mode === 'mane'
     ? [
-        ['scores', '调查积分榜'],
-        ['daily', '每日新分'],
-        ['totals', '主 C 总分榜'],
-        ['players', '玩家荣誉殿堂'],
-        ['rules', '投稿与规则']
+        ['scores', t('navScores', {}, lang)],
+        ['daily', t('navDaily', {}, lang)],
+        ['totals', t('navTotals', {}, lang)],
+        ['players', t('navPlayers', {}, lang)],
+        ['rules', t('navRules', {}, lang)]
       ]
     : [
-        ['leaderboard', '关卡排行榜'],
-        ['carries', '主 C 排行榜'],
-        ['players', '玩家荣誉殿堂'],
-        ['rules', '榜单规则']
+        ['leaderboard', t('navFbLeaderboard', {}, lang)],
+        ['carries', t('navFbCarries', {}, lang)],
+        ['players', t('navFbPlayers', {}, lang)],
+        ['rules', t('navFbRules', {}, lang)]
       ];
   const activePage = state.mode === 'mane' ? state.manePage : state.fbPage;
-  $('#subnav').innerHTML = `
-    <div class="subnav-tabs">
-      ${tabs.map(([key, label]) =>
-        `<button class="subnav-tab ${key === activePage ? 'active' : ''}" data-subpage="${key}">${label}</button>`
-      ).join('')}
-    </div>
-    <div class="subnav-meta">${state.mode === 'mane' ? 'MANE’S BULLETIN · HIGH SCORE' : 'FLASHBACK ARCHIVE · MIN ROUNDS'}</div>`;
-
-  // 全局错误条
-  const noticeEl = $('#globalNotice');
-  if (state.errorNotice) {
-    noticeEl.hidden = false;
-    noticeEl.innerHTML = `<span>${esc(state.errorNotice)}</span><button class="outline-btn" data-action="refresh">重新连接 ↻</button>`;
+  const subnavTabsHtml = tabs.map(([key, label]) =>
+    `<button type="button" class="subnav-tab ${key === activePage ? 'active' : ''}" data-subpage="${key}">${esc(label)}</button>`
+  ).join('');
+  const subnavMetaText = state.mode === 'mane' ? t('subnavMetaMane', {}, lang) : t('subnavMetaFb', {}, lang);
+  const subnavTabsEl = $('#subnavTabs');
+  const subnavMetaEl = $('#subnavMeta');
+  if (subnavTabsEl) {
+    subnavTabsEl.innerHTML = subnavTabsHtml;
+    if (subnavMetaEl) subnavMetaEl.textContent = subnavMetaText;
   } else {
-    noticeEl.hidden = true;
-    noticeEl.innerHTML = '';
+    $('#subnav').innerHTML = `
+      <div class="subnav-tabs" id="subnavTabs">${subnavTabsHtml}</div>
+      <div class="subnav-right" id="subnavRight"><span class="subnav-meta" id="subnavMeta">${esc(subnavMetaText)}</span></div>`;
+  }
+
+  // Global notice bar
+  const noticeEl = $('#globalNotice');
+  if (noticeEl) {
+    if (state.errorNotice) {
+      noticeEl.hidden = false;
+      noticeEl.classList.add('is-error');
+      noticeEl.innerHTML = `<span>${esc(state.errorNotice)}</span><button type="button" class="outline-btn" data-action="sync-live">${esc(t('btnReconnect', {}, lang))}</button>`;
+    } else {
+      noticeEl.hidden = true;
+      noticeEl.classList.remove('is-error');
+      noticeEl.innerHTML = '';
+    }
+  }
+
+  // Localized Footer
+  const footerEl = $('#siteFooter');
+  if (footerEl) {
+    const wikiManeHref = en
+      ? 'https://reverse1999.fandom.com/wiki/Mane%27s_Bulletin'
+      : 'https://res1999.huijiwiki.com/wiki/%E9%AC%83%E6%AF%9B%E9%82%AE%E6%8A%A5';
+    const wikiFbHref = en
+      ? 'https://reverse1999.fandom.com/wiki/Focused_Flashback'
+      : 'https://res1999.huijiwiki.com/wiki/%E7%84%A6%E7%82%B9%E9%97%AA%E5%9B%9E';
+    const wikiManeLabel = en
+      ? "Reverse: 1999 Wiki · Mane's Bulletin ↗"
+      : t('footerWikiMane', {}, lang);
+    const wikiFbLabel = en
+      ? 'Reverse: 1999 Wiki · Focused Flashback ↗'
+      : t('footerWikiFb', {}, lang);
+    const creditsHtml = en
+      ? `Curator: <span class="is-player-name">幻化凌风</span> (<a href="https://space.bilibili.com/266889606" target="_blank" rel="noopener noreferrer">Bilibili ↗</a>) · Moderators: <span class="is-player-name">寻屿</span>, <span class="is-player-name">莳雨枫椛</span>, <span class="is-player-name">偶尔出现的神秘猫猫头</span>, <span class="is-player-name">椋-喵</span>`
+      : `社区榜单站长：幻化凌风（<a href="https://space.bilibili.com/266889606" target="_blank" rel="noopener noreferrer">哔哩哔哩主页 ↗</a>）· 管理员：寻屿、莳雨枫椛、偶尔出现的神秘猫猫头、椋-喵`;
+
+    footerEl.innerHTML = `
+      <div class="footer-inner">
+        <div class="footer-col">
+          <div class="footer-brand">
+            <strong>${esc(t('footerBrandTitle', {}, lang))}</strong>
+            <span>${esc(t('footerBrandSub', {}, lang))}</span>
+          </div>
+          <p class="footer-credits">${creditsHtml}</p>
+        </div>
+        <div class="footer-col footer-links">
+          <div class="footer-ref-links">
+            <a href="${esc(wikiManeHref)}" target="_blank" rel="noopener noreferrer">${esc(wikiManeLabel)}</a>
+            <a href="${esc(wikiFbHref)}" target="_blank" rel="noopener noreferrer">${esc(wikiFbLabel)}</a>
+          </div>
+          <p class="footer-disclaimer">${esc(t('footerDisclaimer', {}, lang))}</p>
+        </div>
+      </div>`;
   }
 }
 
 function renderMasthead() {
-  const issue = window.LEADERBOARD_CONFIG?.issueMeta || { version: '4.1', title: '亚特兰蒂斯谋杀案', period: '11/05 – 12/10' };
+  const lang = getLang();
+  const issue = localizeIssueMeta(window.LEADERBOARD_CONFIG?.issueMeta, lang);
 
   if (state.mode === 'mane') {
     const newMaps = activeManeMaps('new');
     const rerunMaps = activeManeMaps('rerun');
-    const latestVer = newMaps[0]?.edition || issue.version;
     const players = new Set(state.maneScores.map((r) => normKey(r.display_name)).filter(Boolean)).size;
     const peak = findManeSitewidePeak();
-    const peakSource = peak ? `${peak.map.name} · ${DIVISIONS[peak.rec.division]}` : '全站最高调查积分';
+    const peakBossArt = peak ? resolveBossAsset(peak.map.name, peak.map.section) : null;
+    const peakGrade = peak ? resolveManeGrade(peak.score, lang) : null;
+    const peakSource = peak
+      ? `${displayBossName(peak.map.name, lang)} · ${localizeDivisionShort(peak.rec.division, lang)}`
+      : t('sitePeakFallback', {}, lang);
 
     $('#masthead').innerHTML = `
       <span class="masthead-stencil" aria-hidden="true">MANE’S BULLETIN</span>
       <div class="masthead-identity">
         <div class="masthead-title-row">
           <span class="title-seal-orb" aria-hidden="true"></span>
-          <h1>鬃毛邮报</h1>
-          <span class="masthead-en">Mane’s Bulletin</span>
+          <h1>${esc(t('maneTitle', {}, lang))}</h1>
+          <span class="masthead-en">${esc(t('maneEnTag', {}, lang))}</span>
         </div>
-        <span class="edition-pill">
-          <img class="uttu-micro-icon" src="./assets/uttu/btn_calendar.webp" alt="" aria-hidden="true" />
-          <span>${esc(latestVer)} · ${esc(issue.title)}（${esc(issue.period)}）</span>
+        <span class="masthead-edition-ribbon">
+          <span class="edition-hourglass" aria-hidden="true">⧗</span>
+          <span>${esc(issue.fullLabel)}</span>
           <span class="edition-sep" aria-hidden="true"></span>
-          <span class="edition-badge-text">${state.maneSection === 'new' ? '鉴藏者特版' : '怪相档案'}</span>
+          <span class="edition-badge-text">${esc(localizeSection(state.maneSection, lang))}</span>
         </span>
+        <p class="masthead-motto">${esc(t('maneMotto', {}, lang))}</p>
       </div>
-      <div class="masthead-metrics" aria-label="全站档案实时统计">
+      <div class="masthead-metrics" aria-label="${esc(t('mastheadMetricsAria', {}, lang))}">
         <div class="mstat-cell">
           <strong>${state.maneScores.length || '—'}</strong>
-          <small>全站有效纪录</small>
+          <small>${esc(t('metricRecords', {}, lang))}</small>
         </div>
         <div class="mstat-cell">
           <strong>${players || '—'}</strong>
-          <small>上榜调查员</small>
+          <small>${esc(t('metricInvestigators', {}, lang))}</small>
         </div>
         <div class="mstat-cell">
           <strong>${newMaps.length} / ${rerunMaps.length}</strong>
-          <small>鉴藏 / 怪相首领</small>
+          <small>${esc(t('metricBosses', {}, lang))}</small>
         </div>
         ${peak
-          ? `<button type="button" class="mstat-cell mstat-jump" data-jump-mane-record="${esc(peak.rec.id)}" data-jump-section="${esc(peak.map.section)}" data-jump-map="${esc(peak.map.id)}" data-jump-div="${esc(peak.rec.division)}" title="点击直达全站最高分所属榜单：${esc(peakSource)}">
-               <strong>${formatScore(peak.score)}</strong>
-               <small><span class="jump-tag">全站最高</span><span class="jump-desc">${esc(peakSource)} ↗</span></small>
+          ? `<button type="button" class="mstat-cell mstat-jump is-peak-card" data-jump-mane-record="${esc(peak.rec.id)}" data-jump-section="${esc(peak.map.section)}" data-jump-map="${esc(peak.map.id)}" data-jump-div="${esc(peak.rec.division)}" title="${esc(t('jumpPeakTitle', { source: peakSource }, lang))}">
+               ${peakBossArt?.thumb ? `<span class="peak-card-art" style="background-image:url('${esc(peakBossArt.thumb)}')" aria-hidden="true"></span>` : ''}
+               <div class="peak-card-top">
+                 ${peakGrade?.img ? `<img class="peak-mini-grade" src="${esc(peakGrade.img)}" alt="" aria-hidden="true" />` : ''}
+                 <strong>${formatScore(peak.score, lang)}</strong>
+               </div>
+               <small><span class="jump-tag">${esc(t('jumpTagPeak', {}, lang))}</span><span class="jump-desc">${esc(peakSource)} ↗</span></small>
              </button>`
-          : `<div class="mstat-cell"><strong>—</strong><small>全站最高积分</small></div>`
+          : `<div class="mstat-cell"><strong>—</strong><small>${esc(t('metricSitePeak', {}, lang))}</small></div>`
         }
       </div>`;
   } else {
     const activeVer = state.fbVersions.find((v) => v.id === state.fbVersionId) || state.fbVersions[0];
     const activePlayers = state.fbPlayers.filter((p) => p.version_id === null).length;
     const peak = findFlashbackSitewidePeak();
-    const peakSource = peak ? `${peak.stage.name} · ${DIVISIONS[peak.rec.group_code]}` : '限定 0–6 回合';
+    const peakArt = peak ? resolveFlashbackStageArt(peak.stage) : null;
+    const peakSource = peak
+      ? `${cleanStageDisplayName(peak.stage.name, lang)} · ${localizeDivisionShort(peak.rec.group_code, lang)}`
+      : t('fbRoundWindowFallback', {}, lang);
 
     $('#masthead').innerHTML = `
       <span class="masthead-stencil" aria-hidden="true">FLASHBACK</span>
+      <div class="astrolabe-ornament" aria-hidden="true"></div>
       <div class="masthead-identity">
         <div class="masthead-title-row">
           <span class="title-seal-orb" aria-hidden="true"></span>
-          <h1>焦点闪回</h1>
-          <span class="masthead-en">Flashback</span>
+          <h1>${esc(t('fbTitle', {}, lang))}</h1>
+          <span class="masthead-en">${esc(t('fbEnTag', {}, lang))}</span>
         </div>
-        <span class="edition-pill">
-          <img class="uttu-micro-icon" src="./assets/uttu/btn_calendar.webp" alt="" aria-hidden="true" />
-          <span>${esc(activeVer?.label || '焦点闪回周期榜')}</span>
+        <span class="masthead-edition-ribbon">
+          <span class="edition-hourglass" aria-hidden="true">⧗</span>
+          <span>${esc(activeVer ? localizeVersionLabel(activeVer, lang) : t('fbCycleFallback', {}, lang))}</span>
           <span class="edition-sep" aria-hidden="true"></span>
-          <span class="edition-badge-text">0–6 回合限定</span>
+          <span class="edition-badge-text">${esc(t('fbRoundLimitTag', {}, lang))}</span>
         </span>
+        <p class="masthead-motto">${esc(t('fbMotto', {}, lang))}</p>
       </div>
-      <div class="masthead-metrics" aria-label="焦点闪回全站统计">
+      <div class="masthead-metrics" aria-label="${esc(t('fbMetricsAria', {}, lang))}">
         <div class="mstat-cell">
           <strong>${state.fbRecords.length || '—'}</strong>
-          <small>全站有效纪录</small>
+          <small>${esc(t('metricRecords', {}, lang))}</small>
         </div>
         <div class="mstat-cell">
           <strong>${activePlayers || '—'}</strong>
-          <small>荣耀玩家</small>
+          <small>${esc(t('metricHonoredPlayers', {}, lang))}</small>
         </div>
         <div class="mstat-cell">
           <strong>${state.fbVersions.length || '—'}</strong>
-          <small>收录版本期次</small>
+          <small>${esc(t('metricCycles', {}, lang))}</small>
         </div>
         ${peak
-          ? `<button type="button" class="mstat-cell mstat-jump" data-jump-fb-record="${esc(peak.rec.id)}" data-jump-ver="${esc(peak.stage.version_id)}" data-jump-stage="${esc(peak.stage.id)}" data-jump-grp="${esc(peak.rec.group_code)}" title="点击直达最短回合纪录：${esc(peakSource)}">
-               <strong>${peak.rec.rounds} 回合</strong>
-               <small><span class="jump-tag">全站最快</span><span class="jump-desc">${esc(peakSource)} ↗</span></small>
+          ? `<button type="button" class="mstat-cell mstat-jump is-peak-card" data-jump-fb-record="${esc(peak.rec.id)}" data-jump-ver="${esc(peak.stage.version_id)}" data-jump-stage="${esc(peak.stage.id)}" data-jump-grp="${esc(peak.rec.group_code)}" title="${esc(t('jumpFastestTitle', { source: peakSource }, lang))}">
+               ${peakArt?.thumb ? `<span class="peak-card-art" style="background-image:url('${esc(peakArt.thumb)}')" aria-hidden="true"></span>` : ''}
+               <div class="peak-card-top">
+                 <strong>${esc(formatRounds(peak.rec.rounds, lang))}</strong>
+               </div>
+               <small><span class="jump-tag">${esc(t('jumpTagFastest', {}, lang))}</span><span class="jump-desc">${esc(peakSource)} ↗</span></small>
              </button>`
-          : `<div class="mstat-cell"><strong>06</strong><small>限定回合上限</small></div>`
+          : `<div class="mstat-cell"><strong>06</strong><small>${esc(t('fbRoundCap', {}, lang))}</small></div>`
         }
       </div>`;
   }
 }
 
-/* ==================== 首领 / 关卡机制档案抽屉 ==================== */
-function highlightMechText(text) {
+/* ==================== Mechanics Drawers, Status Glossary, Board Intel, Dossiers & Comparison ==================== */
+function highlightMechText(text, lang = getLang()) {
   return esc(text)
-    .replace(/\[([^\]]+)\]/g, '<span class="mech-kw">[$1]</span>')
+    .replace(/\[([^\]]+)\]/g, (match, inner) => {
+      const entry = lookupStatusTerm(inner, lang);
+      if (entry) {
+        return `<button type="button" class="mech-keyword-btn ${esc(entry.badgeClass)}" data-glossary-term="${esc(entry.key)}">[${inner}]</button>`;
+      }
+      return `<span class="mech-kw">[${inner}]</span>`;
+    })
     .replace(/【([^】]+)】/g, '<strong class="mech-em">【$1】</strong>');
 }
 
-function renderManeBossMechanicsDrawer(mech) {
+function closeGlossaryPopover() {
+  state.glossaryOpen = null;
+  const root = $('#glossaryPopoverRoot');
+  if (root) root.innerHTML = '';
+}
+
+function openGlossaryPopover(termKey, anchorEl) {
+  const lang = getLang();
+  const entry = lookupStatusTerm(termKey, lang);
+  const root = $('#glossaryPopoverRoot');
+  if (!entry || !root) return;
+
+  const catMeta = STATUS_CATEGORY_META[entry.category] || STATUS_CATEGORY_META.special;
+  const catLabel = entry.categoryLabel || (isEn(lang) ? catMeta.labelEn : catMeta.labelZh);
+  let subText = '';
+  if (isEn(lang)) {
+    const enAliases = (entry.aliases || []).filter((a) => a && !/[\u4e00-\u9fff]/.test(a));
+    if (enAliases.length) subText = enAliases.slice(0, 3).join(' · ');
+  } else if (entry.en && entry.en !== entry.zh) {
+    subText = entry.en;
+  }
+
+  state.glossaryOpen = { key: entry.key };
+  root.innerHTML = `
+    <div class="glossary-popover" id="glossaryPopover" role="dialog" aria-label="${esc(t('glossaryTitle', {}, lang))}" style="visibility:hidden;left:12px;top:12px">
+      <div class="glossary-pop-head">
+        <div>
+          <strong>${esc(entry.name)}</strong>
+          <div><span class="glossary-pop-cat">${esc(catLabel)}</span></div>
+          ${subText ? `<div class="glossary-pop-sub">${esc(subText)}</div>` : ''}
+        </div>
+        <button type="button" class="glossary-pop-close" data-action="close-glossary" aria-label="${esc(t('glossaryClose', {}, lang))}">×</button>
+      </div>
+      <div class="glossary-pop-body">
+        <p>${highlightMechText(entry.desc, lang)}</p>
+      </div>
+    </div>`;
+
+  const pop = $('#glossaryPopover');
+  if (!pop) return;
+  const rect = anchorEl?.getBoundingClientRect ? anchorEl.getBoundingClientRect() : null;
+  const vw = window.innerWidth || 1024;
+  const vh = window.innerHeight || 768;
+  const popRect = pop.getBoundingClientRect();
+  const popW = popRect.width || 320;
+  const popH = popRect.height || 160;
+  let left = rect ? rect.left + (rect.width / 2) - (popW / 2) : (vw - popW) / 2;
+  let top = rect ? rect.bottom + 8 : (vh - popH) / 2;
+  left = Math.max(10, Math.min(left, vw - popW - 10));
+  if (rect && top + popH > vh - 12 && rect.top - popH - 8 >= 10) {
+    top = rect.top - popH - 8;
+  } else {
+    top = Math.max(10, Math.min(top, vh - popH - 10));
+  }
+  pop.style.left = `${Math.round(left)}px`;
+  pop.style.top = `${Math.round(top)}px`;
+  pop.style.visibility = 'visible';
+}
+
+function renderMechCounterTipsHtml(mech, lang = getLang()) {
+  const tips = Array.isArray(mech?.counterTips) ? mech.counterTips.filter(Boolean) : [];
+  if (!tips.length) return '';
+  return `
+    <div class="mech-tips-card">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+        <strong>✦ ${esc(t('counterTipsHeading', {}, lang))}</strong>
+        <small style="font-size:10.5px;color:var(--brass)">${esc(t('glossaryHint', {}, lang))}</small>
+      </div>
+      <ul>
+        ${tips.map((tip) => `<li>${highlightMechText(tip, lang)}</li>`).join('')}
+      </ul>
+    </div>`;
+}
+
+function renderManeBossMechanicsDrawer(mech, lang = getLang()) {
   if (!mech || !state.maneMechOpen) return '';
   return `
-    <div class="boss-mech-drawer" role="region" aria-label="首领核心机制">
+    <div class="boss-mech-drawer" role="region" aria-label="${esc(t('mechAriaMane', {}, lang))}">
       <div class="mech-drawer-top">
         <div class="mech-top-meta">
           <span class="mech-badge">${esc(mech.modeTag)}</span>
           <span class="mech-field-tag">${esc(mech.battlefield)}</span>
           <span class="mech-favored">${esc(mech.favoredText)}</span>
         </div>
-        <button type="button" class="mech-close-btn" data-action="toggle-mane-mech">收起机制 ▴</button>
+        <button type="button" class="mech-close-btn" data-action="toggle-mane-mech">${esc(t('btnCollapseMech', {}, lang))}</button>
       </div>
 
       <div class="mech-env-block">
-        <div class="mech-section-label">场地规则 · ENVIRONMENT</div>
+        <div class="mech-section-label">${esc(t('mechEnvLabel', {}, lang))}</div>
         <ul class="mech-env-list">
-          ${mech.envRules.map((line) => `<li>${highlightMechText(line)}</li>`).join('')}
+          ${(mech.envRules || []).map((line) => `<li>${highlightMechText(line, lang)}</li>`).join('')}
         </ul>
       </div>
 
       <div class="mech-passives-block">
-        <div class="mech-section-label">首领核心机制 · BOSS PASSIVES</div>
+        <div class="mech-section-label">${esc(t('mechPassivesLabel', {}, lang))}</div>
         <div class="mech-passives-grid">
-          ${mech.passives.map((p) => `
+          ${(mech.passives || []).map((p) => `
             <div class="mech-passive-card">
               <strong>${esc(p.name)}</strong>
-              <p>${highlightMechText(p.desc)}</p>
+              <p>${highlightMechText(p.desc, lang)}</p>
             </div>`).join('')}
         </div>
       </div>
 
+      ${renderMechCounterTipsHtml(mech, lang)}
+
       ${mech.thresholds?.length ? `
         <div class="mech-thresholds-block">
-          <div class="mech-section-label">沉浸式鉴赏 · 分数阶梯强化</div>
+          <div class="mech-section-label">${esc(t('mechThresholdsLabel', {}, lang))}</div>
           <div class="mech-threshold-grid">
-            ${mech.thresholds.map((t) => `
+            ${mech.thresholds.map((step) => `
               <div class="mech-threshold-item">
-                <span class="mech-score-pill">${esc(t.score)}</span>
-                <p>${highlightMechText(t.desc)}</p>
+                <span class="mech-score-pill">${esc(step.score)}</span>
+                <p>${highlightMechText(step.desc, lang)}</p>
               </div>`).join('')}
           </div>
         </div>` : ''}
     </div>`;
 }
 
-function renderFlashbackStageMechanicsDrawer(mech) {
+function renderFlashbackStageMechanicsDrawer(mech, lang = getLang()) {
   if (!mech || !state.fbMechOpen) return '';
   return `
-    <div class="boss-mech-drawer" role="region" aria-label="焦点闪回关卡机制">
+    <div class="boss-mech-drawer" role="region" aria-label="${esc(t('mechAriaFb', {}, lang))}">
       <div class="mech-drawer-top">
         <div class="mech-top-meta">
           <span class="mech-badge">${esc(mech.modeTag)}</span>
-          <span class="mech-favored">敌方阵容：${esc(mech.enemies)}</span>
+          <span class="mech-favored">${esc(t('mechEnemiesLabel', {}, lang))}: ${esc(mech.enemies)}</span>
         </div>
-        <button type="button" class="mech-close-btn" data-action="toggle-fb-mech">收起机制 ▴</button>
+        <button type="button" class="mech-close-btn" data-action="toggle-fb-mech">${esc(t('btnCollapseStageMech', {}, lang))}</button>
       </div>
 
       <div class="mech-env-block">
-        <div class="mech-section-label">场地条件与可用增幅 · ENVIRONMENT &amp; BUFFS</div>
+        <div class="mech-section-label">${esc(t('mechFbEnvLabel', {}, lang))}</div>
         <ul class="mech-env-list">
-          ${mech.envRules.map((line) => `<li>${highlightMechText(line)}</li>`).join('')}
+          ${(mech.envRules || []).map((line) => `<li>${highlightMechText(line, lang)}</li>`).join('')}
         </ul>
       </div>
 
       <div class="mech-passives-block">
-        <div class="mech-section-label">敌方核心机制 · ENEMY MECHANICS</div>
+        <div class="mech-section-label">${esc(t('mechFbPassivesLabel', {}, lang))}</div>
         <div class="mech-passives-grid">
-          ${mech.passives.map((p) => `
+          ${(mech.passives || []).map((p) => `
             <div class="mech-passive-card">
               <strong>${esc(p.name)}</strong>
-              <p>${highlightMechText(p.desc)}</p>
+              <p>${highlightMechText(p.desc, lang)}</p>
             </div>`).join('')}
         </div>
       </div>
+
+      ${renderMechCounterTipsHtml(mech, lang)}
     </div>`;
 }
 
-/* ==================== 鬃毛邮报页面渲染 ==================== */
+function renderBoardIntelBar(mode, ranked, allBoardRecords, lang = getLang()) {
+  const isMane = mode === 'mane';
+  const getCarryStr = (r) => (isMane ? r.carry : r.carry_name);
+  const total = ranked.length;
+
+  let bodyHtml = '';
+  if (!state.intelCollapsed) {
+    if (!total) {
+      bodyHtml = `<div style="font-size:12px;color:var(--ink-muted);padding:4px 2px">${esc(t('intelNoData', {}, lang))}</div>`;
+    } else {
+      // 1. Top Main DPS
+      const topCarries = collectBoardCharacters(ranked, 'carry', getCarryStr, lang).slice(0, 4);
+
+      // 2. Top Supports / Sub-DPS (non-carry teammates)
+      const locale = isEn(lang) ? 'en' : 'zh-CN';
+      const supMap = new Map();
+      for (const row of ranked) {
+        const carryKeys = new Set(splitCarries(getCarryStr(row)).map(canonicalCharacterKey));
+        const seen = new Set();
+        for (const raw of extractLineupCharacterNames(row.team, getCarryStr(row))) {
+          const ch = resolveCharacter(raw);
+          if (!ch) continue;
+          const key = `char:${ch.id}`;
+          if (carryKeys.has(key) || seen.has(key)) continue;
+          seen.add(key);
+          const cur = supMap.get(key);
+          if (cur) cur.count += 1;
+          else supMap.set(key, { label: displayCharacterName(ch.name, lang), count: 1, portrait: ch.portrait || '' });
+        }
+      }
+      const topSupports = [...supMap.entries()]
+        .sort((a, b) => (b[1].count - a[1].count) || a[1].label.localeCompare(b[1].label, locale))
+        .slice(0, 4);
+
+      // 3. Top Equipped Psychubes
+      const psyMap = new Map();
+      for (const row of ranked) {
+        const { psychubes } = extractRecordBuilds(row);
+        for (const rawPsy of psychubes) {
+          if (!rawPsy) continue;
+          const psy = resolvePsychube(rawPsy);
+          if (!psy) continue;
+          const cur = psyMap.get(psy.id);
+          if (cur) cur.count += 1;
+          else psyMap.set(psy.id, { psy, count: 1 });
+        }
+      }
+      const topPsychubes = [...psyMap.values()]
+        .sort((a, b) => (b.count - a.count) || displayPsychubeName(a.psy, lang).localeCompare(displayPsychubeName(b.psy, lang), locale))
+        .slice(0, 6);
+
+      // 4. Score or Round Distribution + P0 vs P5 Peak
+      let distCardHtml = '';
+      if (isMane) {
+        const scores = ranked.map((r) => Number(r.score || 0)).filter((n) => Number.isFinite(n)).sort((a, b) => a - b);
+        const mid = Math.floor(scores.length / 2);
+        const median = scores.length
+          ? (scores.length % 2 === 1 ? scores[mid] : Math.round((scores[mid - 1] + scores[mid]) / 2))
+          : 0;
+        const buckets = [
+          { label: isEn(lang) ? '<10M' : '<1千万', min: 0, max: 10000000, count: 0 },
+          { label: isEn(lang) ? '10M+' : '1千万+', min: 10000000, max: 30000000, count: 0 },
+          { label: isEn(lang) ? '30M+' : '3千万+', min: 30000000, max: 50000000, count: 0 },
+          { label: isEn(lang) ? '50M+' : '5千万+', min: 50000000, max: 100000000, count: 0 },
+          { label: isEn(lang) ? '100M+' : '1亿+', min: 100000000, max: Infinity, count: 0 }
+        ];
+        for (const s of scores) {
+          const hit = buckets.find((b) => s >= b.min && s < b.max);
+          if (hit) hit.count += 1;
+        }
+        const maxBucket = Math.max(1, ...buckets.map((b) => b.count));
+        const p0Best = allBoardRecords.filter((r) => r.division === 'zero').sort(compareManeScore)[0];
+        const p5Best = allBoardRecords.filter((r) => r.division === 'max').sort(compareManeScore)[0];
+
+        distCardHtml = `
+          <div class="intel-card">
+            <div class="intel-card-head">
+              <span>${esc(t('intelScoreDist', {}, lang))}</span>
+              <small>${esc(t('intelMedianScore', {}, lang))}: ${esc(formatCompactScore(median, lang))}</small>
+            </div>
+            <div class="intel-dist-chart">
+              ${buckets.map((b) => {
+                const h = b.count ? Math.max(6, Math.round((b.count / maxBucket) * 44)) : 4;
+                return `
+                  <div class="intel-dist-col" title="${esc(b.label)}: ${esc(formatEntries(b.count, lang))}">
+                    <span>${b.count}</span>
+                    <span class="intel-dist-bar" style="height:${h}px;opacity:${b.count ? 1 : 0.28}"></span>
+                    <span>${esc(b.label)}</span>
+                  </div>`;
+              }).join('')}
+            </div>
+            <div class="intel-peak-diff" title="${esc(t('intelPeakCompare', {}, lang))}">
+              <span>${esc(t('intelPeakP0', {}, lang))}: <strong>${p0Best ? esc(formatCompactScore(p0Best.score, lang)) : '—'}</strong></span>
+              <span>${esc(t('intelPeakP5', {}, lang))}: <strong>${p5Best ? esc(formatCompactScore(p5Best.score, lang)) : '—'}</strong></span>
+            </div>
+          </div>`;
+      } else {
+        const roundVals = ranked.map((r) => Number(r.rounds)).filter((n) => Number.isFinite(n));
+        const avg = roundVals.length ? (roundVals.reduce((a, b) => a + b, 0) / roundVals.length).toFixed(1) : '—';
+        const buckets = [0, 1, 2, 3, 4, 5, 6].map((r) => ({
+          r,
+          label: `${r}R`,
+          count: roundVals.filter((v) => v === r).length
+        }));
+        const maxBucket = Math.max(1, ...buckets.map((b) => b.count));
+        const p0Best = allBoardRecords.filter((r) => r.group_code === 'zero').sort(compareFlashbackRecord)[0];
+        const p5Best = allBoardRecords.filter((r) => r.group_code === 'max').sort(compareFlashbackRecord)[0];
+
+        distCardHtml = `
+          <div class="intel-card">
+            <div class="intel-card-head">
+              <span>${esc(t('intelRoundDist', {}, lang))}</span>
+              <small>${esc(t('intelAvgRounds', {}, lang))}: ${esc(avg === '—' ? '—' : `${avg}R`)}</small>
+            </div>
+            <div class="intel-dist-chart">
+              ${buckets.map((b) => {
+                const h = b.count ? Math.max(6, Math.round((b.count / maxBucket) * 44)) : 4;
+                return `
+                  <div class="intel-dist-col" title="${esc(formatRounds(b.r, lang))}: ${esc(formatEntries(b.count, lang))}">
+                    <span>${b.count}</span>
+                    <span class="intel-dist-bar" style="height:${h}px;opacity:${b.count ? 1 : 0.28}"></span>
+                    <span>${esc(b.label)}</span>
+                  </div>`;
+              }).join('')}
+            </div>
+            <div class="intel-peak-diff" title="${esc(t('intelPeakCompare', {}, lang))}">
+              <span>${esc(t('intelPeakP0', {}, lang))}: <strong>${p0Best ? esc(formatRounds(p0Best.rounds, lang)) : '—'}</strong></span>
+              <span>${esc(t('intelPeakP5', {}, lang))}: <strong>${p5Best ? esc(formatRounds(p5Best.rounds, lang)) : '—'}</strong></span>
+            </div>
+          </div>`;
+      }
+
+      bodyHtml = `
+        <div class="intel-grid" style="grid-template-columns:repeat(auto-fit,minmax(215px,1fr))">
+          <div class="intel-card">
+            <div class="intel-card-head">
+              <span>${esc(t('intelTopCarries', {}, lang))}</span>
+              <small>${esc(t('intelUsageRate', {}, lang))}</small>
+            </div>
+            <div class="intel-bar-list">
+              ${topCarries.map(([key, info]) => {
+                const rate = Math.round((info.count / total) * 100);
+                const width = rate > 0 ? Math.max(4, Math.min(100, rate)) : 0;
+                return `
+                  <button type="button" class="intel-bar-row" data-meta-carry="${esc(key)}" data-meta-mode="${esc(mode)}" title="${esc(info.label)} · ${esc(formatEntries(info.count, lang))} (${rate}%)">
+                    <span class="intel-bar-avatar">
+                      ${info.portrait
+                        ? `<img src="${esc(info.portrait)}" alt="${esc(info.label)}" loading="eager" decoding="async" />`
+                        : `<span class="char-slot-mono">${esc(characterMonogram(info.label))}</span>`}
+                    </span>
+                    <span class="intel-bar-main">
+                      <span class="intel-bar-top">
+                        <span>${esc(info.label)}</span>
+                        <strong>${rate}%</strong>
+                      </span>
+                      <span class="intel-bar-track"><span class="intel-bar-fill" style="width:${width}%"></span></span>
+                    </span>
+                  </button>`;
+              }).join('')}
+            </div>
+          </div>
+
+          <div class="intel-card">
+            <div class="intel-card-head">
+              <span>${esc(t('intelTopSupports', {}, lang))}</span>
+              <small>${esc(t('intelUsageRate', {}, lang))}</small>
+            </div>
+            <div class="intel-bar-list">
+              ${topSupports.length
+                ? topSupports.map(([key, info]) => {
+                    const rate = Math.round((info.count / total) * 100);
+                    const width = rate > 0 ? Math.max(4, Math.min(100, rate)) : 0;
+                    return `
+                      <button type="button" class="intel-bar-row" data-meta-member="${esc(key)}" data-meta-mode="${esc(mode)}" title="${esc(info.label)} · ${esc(formatEntries(info.count, lang))} (${rate}%)">
+                        <span class="intel-bar-avatar">
+                          ${info.portrait
+                            ? `<img src="${esc(info.portrait)}" alt="${esc(info.label)}" loading="eager" decoding="async" />`
+                            : `<span class="char-slot-mono">${esc(characterMonogram(info.label))}</span>`}
+                        </span>
+                        <span class="intel-bar-main">
+                          <span class="intel-bar-top">
+                            <span>${esc(info.label)}</span>
+                            <strong>${rate}%</strong>
+                          </span>
+                          <span class="intel-bar-track"><span class="intel-bar-fill" style="width:${width}%"></span></span>
+                        </span>
+                      </button>`;
+                  }).join('')
+                : `<div style="font-size:11.5px;color:var(--ink-muted)">${esc(t('intelNoData', {}, lang))}</div>`
+              }
+            </div>
+          </div>
+
+          <div class="intel-card">
+            <div class="intel-card-head">
+              <span>${esc(t('intelTopPsychubes', {}, lang))}</span>
+              <small>${esc(formatEntries(topPsychubes.reduce((sum, x) => sum + x.count, 0), lang))}</small>
+            </div>
+            ${topPsychubes.length
+              ? `<div class="intel-psy-chips">
+                  ${topPsychubes.map(({ psy, count }) => {
+                    const pName = displayPsychubeName(psy, lang);
+                    return `
+                      <button type="button" class="intel-psy-chip" data-open-psy="${esc(psy.id)}" title="${esc(pName)} ×${count}">
+                        <img src="${esc(psychubeIconSrc(psy.id))}" alt="" aria-hidden="true" loading="eager" decoding="async" />
+                        <span>${esc(pName)}</span>
+                        <strong style="color:var(--gold);font-size:10px">×${count}</strong>
+                      </button>`;
+                  }).join('')}
+                </div>`
+              : `<div style="font-size:11.5px;color:var(--ink-muted)">${esc(t('intelNoData', {}, lang))}</div>`
+            }
+          </div>
+
+          ${distCardHtml}
+        </div>`;
+    }
+  }
+
+  return `
+    <section class="board-intel-bar ${state.intelCollapsed ? 'is-collapsed' : ''}" aria-label="${esc(t('intelTitle', {}, lang))}">
+      <div class="intel-header">
+        <div class="intel-title-group">
+          <strong>◈ ${esc(t('intelTitle', {}, lang))}</strong>
+          <span>${esc(t('intelSubtitle', {}, lang))}</span>
+        </div>
+        <button type="button" class="intel-collapse-btn" data-action="toggle-intel-bar" aria-expanded="${!state.intelCollapsed}">
+          ${esc(state.intelCollapsed ? t('intelExpand', {}, lang) : t('intelCollapse', {}, lang))}
+        </button>
+      </div>
+      ${bodyHtml}
+    </section>`;
+}
+
+function renderRowIntelColumnHtml({
+  mode,
+  record,
+  rank,
+  resonanceCodes,
+  boardPeak,
+  mapName = '',
+  stageFastest,
+  lang = getLang()
+}) {
+  const isMane = mode === 'mane';
+  const carryRaw = isMane ? record.carry : record.carry_name;
+  const { archetypes } = detectTeamArchetypes(record.team, carryRaw, lang);
+
+  // 1. Archetype Chips + Optional Resonance Code Count
+  const archChipsHtml = archetypes.map((a) => `<span class="row-archetype-chip">${esc(a.label)}</span>`).join('');
+  const resCount = resonanceCodes.filter(Boolean).length;
+  const resBadge = resCount > 0 ? `<span class="row-res-badge">${esc(t('rowResCodesCount', { n: resCount }, lang))}</span>` : '';
+
+  // 2. Relative-to-Peak Gauge (Mane only: Collector's Edition uses numberless I-VI appraisal rail; Anomaly Gallery uses warm segmented bar)
+  let peakMeterHtml = '';
+  if (isMane) {
+    const peakVal = boardPeak ? Number(boardPeak.score || 0) : Number(record.score || 0);
+    const curVal = Number(record.score || 0);
+    const pct = rank === 1 ? 100 : (peakVal > 0 ? Math.min(100, Math.max(2, Math.round((curVal / peakVal) * 100))) : 100);
+    const appraisal = mapName ? getBossThresholdProgress(mapName, record.score, lang) : null;
+    const thresholds = appraisal?.thresholds || [];
+    if (thresholds.length) {
+      const railHtml = thresholds.map((step, i) => {
+        const rom = step.roman || toRoman(i + 1);
+        const nextStep = thresholds[i + 1];
+        const node = `<span class="row-appraisal-node ${step.reached ? 'is-cleared' : ''}" title="${esc(rom)} · ${esc(step.scoreLabel)}">${esc(rom)}</span>`;
+        const link = nextStep
+          ? `<span class="row-appraisal-link ${step.reached && nextStep.reached ? 'is-cleared' : ''}" aria-hidden="true"></span>`
+          : '';
+        return node + link;
+      }).join('');
+      peakMeterHtml = `
+        <div class="row-peak-meter ${rank === 1 ? 'is-peak' : ''} has-appraisal-rail">
+          <div class="row-appraisal-rail" aria-label="${esc(t('appraisalActiveLabel', {}, lang))}">${railHtml}</div>
+          <div class="row-peak-text">
+            <span>${rank === 1 ? `<strong>${esc(t('rowPeakRecord', {}, lang))}</strong>` : esc(t('rowVsPeak', { pct }, lang))}</span>
+          </div>
+        </div>`;
+    } else {
+      peakMeterHtml = `
+        <div class="row-peak-meter ${rank === 1 ? 'is-peak' : ''}">
+          <div class="row-peak-bar"><div class="row-peak-fill" style="width:${pct}%"></div></div>
+          <div class="row-peak-text">
+            <span>${rank === 1 ? `<strong>${esc(t('rowPeakRecord', {}, lang))}</strong>` : esc(t('rowVsPeak', { pct }, lang))}</span>
+          </div>
+        </div>`;
+    }
+  }
+
+  // 3. Optional Watch Guide Link
+  let guideHref = '';
+  try { guideHref = parseHttpUrl(record.related_url); } catch { guideHref = ''; }
+
+  return `
+    <div class="row-intel-col">
+      ${(archChipsHtml || resBadge) ? `<div class="row-archetype-strip">${archChipsHtml}${resBadge}</div>` : ''}
+      ${peakMeterHtml}
+      ${guideHref ? `<div class="row-quick-actions"><a class="row-quick-btn" href="${esc(guideHref)}" target="_blank" rel="noopener noreferrer ugc">${esc(t('rowWatchGuide', {}, lang))}</a></div>` : ''}
+    </div>`;
+}
+
+/* ==================== V2 Deep Dossier Modals (Arcanist, Psychube, Investigator) ==================== */
+function openArcanistDossier(rawName) {
+  const lang = getLang();
+  const detail = getArcanistDetail(rawName, lang);
+  if (!detail) return;
+  closeGlossaryPopover();
+
+  const targetKey = detail.id ? `char:${detail.id}` : canonicalCharacterKey(detail.cn || rawName);
+  const affMeta = AFFLATUS_META[detail.aff] || AFFLATUS_META.unknown;
+  const affLabel = localizeAfflatus(detail.aff, lang);
+  const dmgLabel = detail.dmg === 'mental' ? t('dossierDmgMental', {}, lang) : t('dossierDmgReality', {}, lang);
+  const roleLabels = (detail.roleLabels && detail.roleLabels.length)
+    ? detail.roleLabels
+    : (detail.roles || []).map((r) => {
+        const lbl = ARC_ROLE_LABELS[r];
+        return lbl ? (isEn(lang) ? lbl.en : lbl.zh) : r;
+      });
+
+  let maneCount = 0;
+  let fbCount = 0;
+  let carryCount = 0;
+  let peakManeScore = 0n;
+  let fastestFb = null;
+  const teammateCounts = new Map();
+  const psyCounts = new Map();
+
+  const tallyRun = (team, carryStr, psychubes, isMane, metricVal) => {
+    const members = extractLineupCharacterNames(team, carryStr);
+    const carries = splitCarries(carryStr);
+    const hasChar = members.some((m) => canonicalCharacterKey(m) === targetKey) ||
+      carries.some((c) => canonicalCharacterKey(c) === targetKey);
+    if (!hasChar) return;
+    if (isMane) {
+      maneCount += 1;
+      const sc = BigInt(metricVal || 0);
+      if (sc > peakManeScore) peakManeScore = sc;
+    } else {
+      fbCount += 1;
+      const r = Number(metricVal);
+      if (Number.isFinite(r) && (fastestFb === null || r < fastestFb)) fastestFb = r;
+    }
+    if (carries.some((c) => canonicalCharacterKey(c) === targetKey)) carryCount += 1;
+
+    const seenMate = new Set();
+    for (const m of members) {
+      const ch = resolveCharacter(m);
+      if (!ch) continue;
+      const k = `char:${ch.id}`;
+      if (k === targetKey || seenMate.has(k)) continue;
+      seenMate.add(k);
+      const cur = teammateCounts.get(k);
+      if (cur) cur.count += 1;
+      else teammateCounts.set(k, { char: ch, count: 1 });
+    }
+
+    const slots = parseLineupSlots(team, carryStr);
+    for (let i = 0; i < slots.length; i++) {
+      const sl = slots[i];
+      const slKey = sl?.char ? `char:${sl.char.id}` : canonicalCharacterKey(sl?.raw || '');
+      if (slKey === targetKey && psychubes[i]) {
+        const psy = resolvePsychube(psychubes[i]);
+        if (psy) {
+          const cur = psyCounts.get(psy.id);
+          if (cur) cur.count += 1;
+          else psyCounts.set(psy.id, { psy, count: 1 });
+        }
+      }
+    }
+  };
+
+  for (const r of state.maneScores) {
+    const { psychubes } = extractRecordBuilds(r);
+    tallyRun(r.team, r.carry, psychubes, true, r.score);
+  }
+  for (const r of state.fbRecords) {
+    const { psychubes } = extractRecordBuilds(r);
+    tallyRun(r.team, r.carry_name, psychubes, false, r.rounds);
+  }
+
+  const totalRuns = maneCount + fbCount;
+  const carryRate = totalRuns > 0 ? `${Math.round((carryCount / totalRuns) * 100)}%` : '—';
+  const topMates = [...teammateCounts.values()].sort((a, b) => b.count - a.count).slice(0, 6);
+  const topPsys = [...psyCounts.values()].sort((a, b) => b.count - a.count).slice(0, 6);
+  const subName = !isEn(lang) && detail.en && detail.en !== detail.displayName ? detail.en : '';
+
+  openModal(`
+    <div class="dossier-modal-head">
+      <div class="dossier-portrait-frame">
+        ${detail.portrait
+          ? `<img src="${esc(detail.portrait)}" alt="${esc(detail.displayName)}" />`
+          : `<div style="width:100%;height:100%;display:grid;place-items:center;font-family:var(--font-serif);font-size:24px;color:var(--brass)">${esc(characterMonogram(detail.displayName))}</div>`}
+      </div>
+      <div style="min-width:0;flex:1">
+        <div class="modal-eyebrow">${esc(t('dossierCharEyebrow', {}, lang))}</div>
+        <h2 style="margin-bottom:2px">${esc(detail.displayName)}</h2>
+        ${subName ? `<div style="font-size:12.5px;color:var(--brass);margin-bottom:4px">${esc(subName)}</div>` : ''}
+        <div class="dossier-badges-row">
+          <span class="dossier-pill">
+            ${affMeta.icon ? `<img src="${esc(affMeta.icon)}" alt="" aria-hidden="true" />` : ''}
+            ${esc(affLabel)}
+          </span>
+          <span class="dossier-pill">${detail.star}★</span>
+          <span class="dossier-pill">${esc(dmgLabel)}</span>
+          ${detail.euphoria ? `<span class="dossier-pill" style="border-color:var(--gold);color:#fbe3a6">✦ ${esc(t('dossierEuphoria', {}, lang))}</span>` : ''}
+          ${detail.version ? `<span class="dossier-pill">${esc(t('dossierVersion', { ver: `v${detail.version}` }, lang))}</span>` : ''}
+          ${roleLabels.map((lbl) => `<span class="dossier-pill">${esc(lbl)}</span>`).join('')}
+        </div>
+      </div>
+    </div>
+
+    <div class="dossier-section-title"><span>${esc(t('dossierArchiveStats', {}, lang))}</span></div>
+    <div class="dossier-stat-grid">
+      <div class="dossier-stat-box">
+        <strong>${maneCount}</strong>
+        <small>${esc(t('dossierManeAppearances', {}, lang))}</small>
+      </div>
+      <div class="dossier-stat-box">
+        <strong>${fbCount}</strong>
+        <small>${esc(t('dossierFbAppearances', {}, lang))}</small>
+      </div>
+      <div class="dossier-stat-box">
+        <strong>${esc(carryRate)}</strong>
+        <small>${esc(t('dossierMainDpsRate', {}, lang))}</small>
+      </div>
+      <div class="dossier-stat-box">
+        <strong>${peakManeScore > 0n ? esc(formatCompactScore(peakManeScore, lang)) : (fastestFb !== null ? esc(formatRounds(fastestFb, lang)) : '—')}</strong>
+        <small>${esc(peakManeScore > 0n ? t('dossierPeakScore', {}, lang) : t('dossierFastestClear', {}, lang))}</small>
+      </div>
+    </div>
+
+    <div class="dossier-section-title"><span>${esc(t('dossierTopTeammates', {}, lang))}</span></div>
+    ${topMates.length
+      ? `<div class="dossier-chip-list">
+          ${topMates.map(({ char, count }) => {
+            const name = displayCharacterName(char.name, lang);
+            return `
+              <button type="button" class="dossier-chip" data-open-char="${esc(char.name)}">
+                ${char.portrait ? `<img src="${esc(char.portrait)}" alt="" aria-hidden="true" />` : ''}
+                <span>${esc(name)}</span>
+                <small style="color:var(--gold)">×${count}</small>
+              </button>`;
+          }).join('')}
+        </div>`
+      : `<p class="field-hint">${esc(t('dossierNoData', {}, lang))}</p>`}
+
+    <div class="dossier-section-title"><span>${esc(t('dossierTopPsychubes', {}, lang))}</span></div>
+    ${topPsys.length
+      ? `<div class="dossier-chip-list">
+          ${topPsys.map(({ psy, count }) => {
+            const pName = displayPsychubeName(psy, lang);
+            return `
+              <button type="button" class="dossier-chip" data-open-psy="${esc(psy.id)}">
+                <img src="${esc(psychubeIconSrc(psy.id))}" alt="" aria-hidden="true" style="width:20px;height:20px;object-fit:contain" />
+                <span>${esc(pName)}</span>
+                <small style="color:var(--gold)">×${count}</small>
+              </button>`;
+          }).join('')}
+        </div>`
+      : `<p class="field-hint">${esc(t('dossierNoData', {}, lang))}</p>`}
+
+    <div class="dossier-actions-row">
+      <button type="button" class="copper-btn" data-filter-dossier-char="${esc(targetKey)}">${esc(t('dossierFilterBoard', {}, lang))}</button>
+      ${detail.wikiUrl ? `<a class="outline-btn" href="${esc(detail.wikiUrl)}" target="_blank" rel="noopener noreferrer">${esc(t('dossierOpenWiki', {}, lang))}</a>` : ''}
+      <button type="button" class="ghost-btn" data-action="close-modal">${esc(t('btnClose', {}, lang))}</button>
+    </div>`, true);
+}
+
+const CIRCLED_NUMS = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧'];
+
+function parsePsychubeAmpPassive(rawPassive) {
+  const src = String(rawPassive || '');
+  const re = /(\d+(?:\.\d+)?)(%?)\s*[–—\-~至]\s*(\d+(?:\.\d+)?)(%?)/g;
+  const groupByKey = new Map();
+  const uniqueGroups = [];
+  let occCounter = 0;
+
+  const templateText = src.replace(re, (full, aStr, u1, bStr, u2) => {
+    const a = Number(aStr);
+    const b = Number(bStr);
+    if (!Number.isFinite(a) || !Number.isFinite(b) || b <= a) return full;
+    if ((u1 === '%' && !u2) || (!u1 && u2 === '%' && a >= 100)) return full;
+    const isPct = u1 === '%' || u2 === '%';
+    const unit = isPct ? '%' : '';
+    const key = `${a}|${b}|${unit}`;
+    let grp = groupByKey.get(key);
+    if (!grp) {
+      const levels = [0, 1, 2, 3, 4].map((i) => {
+        if (isPct) {
+          const v = a + ((b - a) * i) / 4;
+          return `${Number(v.toFixed(2))}%`;
+        }
+        const v = i === 0 ? a : (i === 4 ? b : Math.floor(a + ((b - a) * i) / 4));
+        return String(v);
+      });
+      grp = { idx: uniqueGroups.length + 1, a, b, unit, levels };
+      groupByKey.set(key, grp);
+      uniqueGroups.push(grp);
+    }
+    occCounter += 1;
+    return `@@PSYAMP_${grp.idx}_${occCounter}@@`;
+  });
+
+  return { templateText, uniqueGroups };
+}
+
+function renderPsychubePassiveBlockHtml(rawPassive, ampLevel = 5, lang = getLang()) {
+  if (!rawPassive) return '';
+  const { templateText, uniqueGroups } = parsePsychubeAmpPassive(rawPassive);
+  if (!uniqueGroups.length) {
+    return `<div class="psy-passive-box">${highlightMechText(rawPassive, lang)}</div>`;
+  }
+
+  const level = Math.min(5, Math.max(1, Number(ampLevel) || 5));
+  const lvIdx = level - 1;
+  const multi = uniqueGroups.length > 1;
+  const ampLabel = isEn(lang) ? 'Amplification' : '增幅等级';
+
+  const renderedBody = highlightMechText(templateText, lang).replace(/@@PSYAMP_(\d+)_(\d+)@@/g, (_, gi) => {
+    const g = uniqueGroups[Number(gi) - 1];
+    if (!g) return '';
+    const circ = CIRCLED_NUMS[g.idx - 1] || `(${g.idx})`;
+    return `<span class="psy-amp-val">${esc(g.levels[lvIdx])}${multi ? `<sup>${circ}</sup>` : ''}</span>`;
+  });
+
+  return `
+    <div class="psy-amp-bar">
+      <span style="font-size:11.5px;color:var(--brass);font-family:var(--font-serif);font-weight:600">${esc(ampLabel)}</span>
+      <div class="psy-amp-pills" role="group" aria-label="${esc(ampLabel)}">
+        ${[1, 2, 3, 4, 5].map((lv) => `
+          <button type="button" class="psy-amp-btn ${lv === level ? 'active' : ''}" data-psy-amp-level="${lv}" aria-pressed="${lv === level}">Lv.${lv}</button>`).join('')}
+      </div>
+    </div>
+    <div class="psy-passive-box">${renderedBody}</div>
+    <div class="psy-amp-grid" aria-label="${esc(ampLabel)}">
+      <div class="psy-amp-row is-head ${multi ? 'has-label' : ''}">
+        ${multi ? `<span class="psy-amp-idx">#</span>` : ''}
+        ${[1, 2, 3, 4, 5].map((lv) => `
+          <button type="button" class="psy-amp-cell ${lv === level ? 'is-active' : ''}" data-psy-amp-level="${lv}">Lv.${lv}</button>`).join('')}
+      </div>
+      ${uniqueGroups.map((g) => `
+        <div class="psy-amp-row ${multi ? 'has-label' : ''}">
+          ${multi ? `<span class="psy-amp-idx">${CIRCLED_NUMS[g.idx - 1] || g.idx}</span>` : ''}
+          ${g.levels.map((val, i) => `
+            <button type="button" class="psy-amp-cell ${(i + 1) === level ? 'is-active' : ''}" data-psy-amp-level="${i + 1}">${esc(val)}</button>`).join('')}
+        </div>`).join('')}
+    </div>`;
+}
+
+function openPsychubeDossier(rawPsy) {
+  const lang = getLang();
+  const detail = getPsychubeDetail(rawPsy, lang);
+  if (!detail) return;
+  closeGlossaryPopover();
+  state.activePsyDossierId = detail.id;
+  state.psyAmpLevel = 5;
+
+  let equipCount = 0;
+  const carrierCounts = new Map();
+  const scanRecords = (list, getCarryStr) => {
+    for (const r of list) {
+      const { psychubes } = extractRecordBuilds(r);
+      const slots = parseLineupSlots(r.team, getCarryStr(r));
+      for (let i = 0; i < psychubes.length; i++) {
+        const p = psychubes[i] ? resolvePsychube(psychubes[i]) : null;
+        if (!p || p.id !== detail.id) continue;
+        equipCount += 1;
+        const ch = slots[i]?.char || null;
+        if (ch) {
+          const cur = carrierCounts.get(ch.id);
+          if (cur) cur.count += 1;
+          else carrierCounts.set(ch.id, { char: ch, count: 1 });
+        }
+      }
+    }
+  };
+  scanRecords(state.maneScores, (r) => r.carry);
+  scanRecords(state.fbRecords, (r) => r.carry_name);
+
+  const topCarriers = [...carrierCounts.values()].sort((a, b) => b.count - a.count).slice(0, 6);
+  const subName = !isEn(lang) && detail.en && detail.en !== detail.displayName ? detail.en : '';
+  const stats = detail.stats60;
+  const subStatVal = stats ? (isEn(lang) ? stats.subStatEn : stats.subStatZh) : detail.displayStat;
+  const tagsList = isEn(lang)
+    ? (detail.tagsEn || (detail.tags || []).map((tg) => displayPsychubeTag(tg, 'en')))
+    : (detail.tags || []);
+
+  openModal(`
+    <div class="dossier-modal-head">
+      <div class="dossier-psy-frame">
+        <img src="${esc(psychubeFrameSrc(detail.star))}" alt="" aria-hidden="true" style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;transform:scale(1.16)" />
+        <img src="${esc(psychubeIconSrc(detail.id))}" alt="${esc(detail.displayName)}" style="position:relative;z-index:1;width:100%;height:100%;object-fit:contain;transform:scale(1.16)" />
+      </div>
+      <div style="min-width:0;flex:1">
+        <div class="modal-eyebrow">${esc(t('dossierPsyEyebrow', {}, lang))}</div>
+        <h2 style="margin-bottom:2px">${esc(detail.displayName)}</h2>
+        ${subName ? `<div style="font-size:12.5px;color:var(--brass);margin-bottom:4px">${esc(subName)}</div>` : ''}
+        <div class="dossier-badges-row">
+          <span class="dossier-pill">${detail.star}★</span>
+          <span class="dossier-pill">${esc(detail.displayStat)}</span>
+          ${detail.version ? `<span class="dossier-pill">${esc(t('dossierVersion', { ver: `v${detail.version}` }, lang))}</span>` : ''}
+          ${tagsList.map((tg) => `<span class="dossier-pill">${esc(tg)}</span>`).join('')}
+        </div>
+      </div>
+    </div>
+
+    ${stats ? `
+      <div class="dossier-section-title">
+        <span>${esc(t('dossierPsyStats60', {}, lang))}</span>
+        ${subStatVal ? `<span class="dossier-pill">${esc(t('dossierPsySubStat', {}, lang))}: ${esc(subStatVal)}</span>` : ''}
+      </div>
+      <div class="psy-stat60-grid">
+        <div class="psy-stat60-item"><span>${esc(t('dossierPsyAtk', {}, lang))}</span><strong>${stats.atk}</strong></div>
+        <div class="psy-stat60-item"><span>${esc(t('dossierPsyHp', {}, lang))}</span><strong>${stats.hp}</strong></div>
+        <div class="psy-stat60-item"><span>${esc(t('dossierPsyRDef', {}, lang))}</span><strong>${stats.rDef}</strong></div>
+        <div class="psy-stat60-item"><span>${esc(t('dossierPsyMDef', {}, lang))}</span><strong>${stats.mDef}</strong></div>
+      </div>` : ''}
+
+    ${detail.passive ? `
+      <div class="dossier-section-title">
+        <span>${esc(t('dossierPsyPassive', {}, lang))}</span>
+        <small style="font-family:var(--font-sans);text-transform:none;letter-spacing:0;color:var(--ink-muted)">${esc(t('glossaryHint', {}, lang))}</small>
+      </div>
+      <div id="psyPassiveHost" data-psy-id="${esc(detail.id)}">${renderPsychubePassiveBlockHtml(detail.passive, state.psyAmpLevel, lang)}</div>` : ''}
+
+    <div class="dossier-section-title">
+      <span>${esc(t('dossierPsyTopCarriers', {}, lang))}</span>
+      <span>${esc(t('dossierPsyUsage', {}, lang))}: ${equipCount}</span>
+    </div>
+    ${topCarriers.length
+      ? `<div class="dossier-chip-list">
+          ${topCarriers.map(({ char, count }) => {
+            const cName = displayCharacterName(char.name, lang);
+            return `
+              <button type="button" class="dossier-chip" data-open-char="${esc(char.name)}">
+                ${char.portrait ? `<img src="${esc(char.portrait)}" alt="" aria-hidden="true" />` : ''}
+                <span>${esc(cName)}</span>
+                <small style="color:var(--gold)">×${count}</small>
+              </button>`;
+          }).join('')}
+        </div>`
+      : `<p class="field-hint">${esc(t('dossierNoData', {}, lang))}</p>`}
+
+    <div class="dossier-actions-row">
+      ${detail.wikiUrl ? `<a class="outline-btn" href="${esc(detail.wikiUrl)}" target="_blank" rel="noopener noreferrer">${esc(t('dossierOpenWiki', {}, lang))}</a>` : ''}
+      <button type="button" class="ghost-btn" data-action="close-modal">${esc(t('btnClose', {}, lang))}</button>
+    </div>`, true);
+}
+
+function formatDossierLineupText(team, carryStr, lang = getLang()) {
+  const slots = parseLineupSlots(team, carryStr);
+  if (!slots.length) return '';
+  if (slots.length === 1 && slots[0].type === 'legacy') {
+    return t('legacyTeamLabel', {}, lang);
+  }
+  const joiner = isEn(lang) ? ' / ' : ' · ';
+  return slots.map((slot) => {
+    if (slot.type === 'flex') return formatFlexSlot(slot, lang).label;
+    if (slot.type === 'wild') return formatWildSlot(slot, lang).label;
+    const rawName = slot.raw || '';
+    const char = slot.char || resolveCharacter(rawName);
+    return char ? displayCharacterName(char.name, lang) : displayCharacterName(rawName, lang);
+  }).filter(Boolean).join(joiner);
+}
+
+function openInvestigatorDossier(playerName) {
+  const lang = getLang();
+  const targetKey = normKey(playerName);
+  if (!targetKey) return;
+  closeGlossaryPopover();
+
+  const mapById = new Map(state.maneMaps.map((m) => [m.id, m]));
+  const stageById = new Map(state.fbStages.map((s) => [s.id, s]));
+  const verById = new Map(state.fbVersions.map((v) => [v.id, v]));
+
+  // Compute exact ranks per board
+  const maneGroups = new Map();
+  for (const r of state.maneScores) {
+    const gk = `${r.map_id}::${r.division}`;
+    if (!maneGroups.has(gk)) maneGroups.set(gk, []);
+    maneGroups.get(gk).push(r);
+  }
+  const runs = [];
+  let crowns = 0;
+  let podiums = 0;
+  let bestManeScore = 0n;
+  let bestFbRounds = null;
+  let canonicalHandle = playerName;
+  const favCarryMap = new Map();
+
+  const addCarryCount = (carryStr) => {
+    for (const raw of splitCarries(carryStr)) {
+      const ch = resolveCharacter(raw);
+      if (!ch) continue;
+      const cur = favCarryMap.get(ch.id);
+      if (cur) cur.count += 1;
+      else favCarryMap.set(ch.id, { char: ch, count: 1 });
+    }
+  };
+
+  for (const list of maneGroups.values()) {
+    list.sort(compareManeScore);
+    list.forEach((rec, idx) => {
+      if (normKey(rec.display_name) !== targetKey) return;
+      canonicalHandle = rec.display_name || canonicalHandle;
+      const rank = idx + 1;
+      if (rank === 1) crowns += 1;
+      if (rank <= 3) podiums += 1;
+      const sc = BigInt(rec.score || 0);
+      if (sc > bestManeScore) bestManeScore = sc;
+      addCarryCount(rec.carry);
+      const map = mapById.get(rec.map_id);
+      runs.push({
+        mode: 'mane',
+        id: rec.id,
+        rank,
+        title: map ? displayBossName(map.name, lang) : t('modeMane', {}, lang),
+        division: localizeDivisionShort(rec.division, lang),
+        metricText: formatScore(rec.score, lang),
+        carry: displayCarryNames(rec.carry, lang),
+        section: map?.section || 'new',
+        mapId: rec.map_id,
+        rawDiv: rec.division,
+        sortVal: Number(rec.score || 0)
+      });
+    });
+  }
+
+  const fbGroups = new Map();
+  for (const r of state.fbRecords) {
+    const gk = `${r.stage_id}::${r.group_code}`;
+    if (!fbGroups.has(gk)) fbGroups.set(gk, []);
+    fbGroups.get(gk).push(r);
+  }
+  for (const list of fbGroups.values()) {
+    list.sort(compareFlashbackRecord);
+    list.forEach((rec, idx) => {
+      if (normKey(rec.display_name) !== targetKey) return;
+      canonicalHandle = rec.display_name || canonicalHandle;
+      const rank = idx + 1;
+      if (rank === 1) crowns += 1;
+      if (rank <= 3) podiums += 1;
+      const rNum = Number(rec.rounds);
+      if (Number.isFinite(rNum) && (bestFbRounds === null || rNum < bestFbRounds)) bestFbRounds = rNum;
+      addCarryCount(rec.carry_name);
+      const st = stageById.get(rec.stage_id);
+      const ver = st ? verById.get(st.version_id) : null;
+      runs.push({
+        mode: 'flashback',
+        id: rec.id,
+        rank,
+        title: `${ver ? `${ver.code} · ` : ''}${st ? cleanStageDisplayName(st.name, lang) : t('modeFlashback', {}, lang)}`,
+        division: localizeDivisionShort(rec.group_code, lang),
+        metricText: formatRounds(rec.rounds, lang),
+        carry: displayCarryNames(rec.carry_name, lang),
+        verId: st?.version_id || rec.version_id || '',
+        stageId: rec.stage_id,
+        rawDiv: rec.group_code,
+        sortVal: 0
+      });
+    });
+  }
+
+  runs.sort((a, b) => (a.rank - b.rank) || (b.sortVal - a.sortVal));
+  const favCarries = [...favCarryMap.values()].sort((a, b) => b.count - a.count).slice(0, 6);
+
+  const activeManeIds = new Set(state.maneScores.map((r) => r.id));
+  const activeFbIds = new Set(state.fbRecords.map((r) => r.id));
+  const supersededByKey = new Map();
+  for (const rec of state.maneDailyScores || []) {
+    if (!rec?.id || activeManeIds.has(rec.id) || normKey(rec.display_name) !== targetKey) continue;
+    const key = `mane:${rec.id}`;
+    if (supersededByKey.has(key)) continue;
+    const map = mapById.get(rec.map_id);
+    supersededByKey.set(key, {
+      mode: 'mane',
+      id: rec.id,
+      title: map ? displayBossName(map.name, lang) : t('modeMane', {}, lang),
+      division: localizeDivisionShort(rec.division, lang),
+      metricText: formatScore(rec.score, lang),
+      carry: displayCarryNames(rec.carry, lang),
+      teamText: formatDossierLineupText(rec.team, rec.carry, lang),
+      dateMs: Date.parse(rec.approved_at || rec.created_at || '') || 0,
+      scoreVal: Number(rec.score || 0)
+    });
+  }
+  for (const rec of state.fbApprovedRecords || []) {
+    if (!rec?.id || activeFbIds.has(rec.id) || normKey(rec.display_name) !== targetKey) continue;
+    const key = `flashback:${rec.id}`;
+    if (supersededByKey.has(key)) continue;
+    const st = stageById.get(rec.stage_id);
+    const ver = st ? verById.get(st.version_id) : null;
+    supersededByKey.set(key, {
+      mode: 'flashback',
+      id: rec.id,
+      title: `${ver ? `${ver.code} · ` : ''}${st ? cleanStageDisplayName(st.name, lang) : t('modeFlashback', {}, lang)}`,
+      division: localizeDivisionShort(rec.group_code, lang),
+      metricText: formatRounds(rec.rounds, lang),
+      carry: displayCarryNames(rec.carry_name, lang),
+      teamText: formatDossierLineupText(rec.team, rec.carry_name, lang),
+      dateMs: Date.parse(rec.created_at || '') || 0,
+      scoreVal: 0
+    });
+  }
+  const supersededRuns = [...supersededByKey.values()].sort(
+    (a, b) => (b.dateMs - a.dateMs) || (b.scoreVal - a.scoreVal)
+  );
+
+  openModal(`
+    <div class="dossier-modal-head">
+      <div style="min-width:0;flex:1">
+        <div class="modal-eyebrow">${esc(t('dossierPlayerEyebrow', {}, lang))}</div>
+        <h2 class="is-player-name" style="margin-bottom:4px">${esc(canonicalHandle)}</h2>
+        <div class="dossier-badges-row">
+          ${crowns > 0 ? `<span class="hof-crown-pill">♛ ${esc(t('hofCrownsLabel', {}, lang))} ×${crowns}</span>` : ''}
+          ${podiums > 0 ? `<span class="dossier-pill">✦ ${esc(t('hofPodiumsLabel', {}, lang))} ×${podiums}</span>` : ''}
+          <span class="dossier-pill">${esc(formatEntries(runs.length, lang))}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="dossier-stat-grid">
+      <div class="dossier-stat-box">
+        <strong>${crowns}</strong>
+        <small>${esc(t('dossierPlayerCrowns', {}, lang))}</small>
+      </div>
+      <div class="dossier-stat-box">
+        <strong>${podiums}</strong>
+        <small>${esc(t('dossierPlayerPodiums', {}, lang))}</small>
+      </div>
+      <div class="dossier-stat-box">
+        <strong>${runs.length}</strong>
+        <small>${esc(t('dossierPlayerRuns', {}, lang))}</small>
+      </div>
+      <div class="dossier-stat-box">
+        <strong>${bestManeScore > 0n ? esc(formatCompactScore(bestManeScore, lang)) : (bestFbRounds !== null ? esc(formatRounds(bestFbRounds, lang)) : '—')}</strong>
+        <small>${esc(bestManeScore > 0n ? t('dossierPlayerBestMane', {}, lang) : t('dossierPlayerBestFb', {}, lang))}</small>
+      </div>
+    </div>
+
+    <div class="dossier-section-title"><span>${esc(t('dossierPlayerFavCarries', {}, lang))}</span></div>
+    ${favCarries.length
+      ? `<div class="dossier-chip-list">
+          ${favCarries.map(({ char, count }) => {
+            const name = displayCharacterName(char.name, lang);
+            return `
+              <button type="button" class="dossier-chip" data-open-char="${esc(char.name)}">
+                ${char.portrait ? `<img src="${esc(char.portrait)}" alt="" aria-hidden="true" />` : ''}
+                <span>${esc(name)}</span>
+                <small style="color:var(--gold)">×${count}</small>
+              </button>`;
+          }).join('')}
+        </div>`
+      : `<p class="field-hint">${esc(t('dossierNoData', {}, lang))}</p>`}
+
+    <div class="dossier-section-title">
+      <span>${esc(t('dossierPlayerHistory', {}, lang))}</span>
+      <span>${esc(formatEntries(runs.length, lang))}</span>
+    </div>
+    ${runs.length
+      ? `<div class="dossier-run-list">
+          ${runs.map((run) => {
+            const jumpAttrs = run.mode === 'mane'
+              ? `data-jump-mane-record="${esc(run.id)}" data-jump-section="${esc(run.section)}" data-jump-map="${esc(run.mapId)}" data-jump-div="${esc(run.rawDiv)}"`
+              : `data-jump-fb-record="${esc(run.id)}" data-jump-ver="${esc(run.verId)}" data-jump-stage="${esc(run.stageId)}" data-jump-grp="${esc(run.rawDiv)}"`;
+            return `
+              <div class="dossier-run-row">
+                <div style="min-width:0;flex:1">
+                  <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                    <span class="dossier-pill">${esc(run.mode === 'mane' ? t('modeMane', {}, lang) : t('modeFlashback', {}, lang))}</span>
+                    <strong style="color:var(--gold)">#${run.rank}</strong>
+                    <strong>${esc(run.title)}</strong>
+                    <span style="color:var(--ink-muted)">(${esc(run.division)})</span>
+                  </div>
+                  <div style="font-size:11px;color:var(--ink-muted);margin-top:3px">
+                    ${esc(t('mainDpsLabel', {}, lang))}: ${esc(run.carry)}
+                  </div>
+                </div>
+                <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
+                  <strong style="font-family:var(--font-display);color:var(--copper-bright)">${esc(run.metricText)}</strong>
+                  <button type="button" class="text-link-btn" ${jumpAttrs}>${esc(t('dossierJumpToBoard', {}, lang))}</button>
+                </div>
+              </div>`;
+          }).join('')}
+        </div>`
+      : `<p class="field-hint">${esc(t('dossierNoData', {}, lang))}</p>`}
+
+    ${supersededRuns.length
+      ? `<div class="dossier-section-title">
+           <span>${esc(t('dossierPlayerSuperseded', {}, lang))}</span>
+           <span>${esc(formatEntries(supersededRuns.length, lang))}</span>
+         </div>
+         <p class="dossier-superseded-note">${esc(t('dossierSupersededNote', {}, lang))}</p>
+         <div class="dossier-run-list">
+           ${supersededRuns.map((run) => `
+             <div class="dossier-run-row is-superseded">
+               <div style="min-width:0;flex:1">
+                 <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                   <span class="dossier-pill">${esc(run.mode === 'mane' ? t('modeMane', {}, lang) : t('modeFlashback', {}, lang))}</span>
+                   <span class="dossier-superseded-pill">${esc(t('dossierSupersededTag', {}, lang))}</span>
+                   <strong>${esc(run.title)}</strong>
+                   <span style="color:var(--ink-muted)">(${esc(run.division)})</span>
+                 </div>
+                 <div style="font-size:11px;color:var(--ink-muted);margin-top:3px">
+                   ${esc(t('mainDpsLabel', {}, lang))}: ${esc(run.carry)}${run.teamText ? ` · ${esc(run.teamText)}` : ''}
+                 </div>
+               </div>
+               <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
+                 <strong style="font-family:var(--font-display);color:var(--ink-muted)">${esc(run.metricText)}</strong>
+               </div>
+             </div>`).join('')}
+         </div>`
+      : ''}
+
+    <div class="dossier-actions-row">
+      <button type="button" class="ghost-btn" data-action="close-modal">${esc(t('btnClose', {}, lang))}</button>
+    </div>`, true);
+}
+
+/* ==================== Mane's Bulletin Pages ==================== */
 let maneDailyLoadSeq = 0;
 
-async function loadManeDailyRows({date, division, mapIds}) {
-  const [start, end] = beijingDayRange(date);
+async function loadManeDailyRows({ date, division, mapIds }) {
+  if (state.dataSource === 'offline' || !sb) {
+    return filterOfflineDailyRows(state.maneDailyScores, { date, division, mapIds });
+  }
+  const [start, end] = beijingDayRange(date, getLang());
   const rows = [];
   for (let offset = 0; ; offset += 500) {
     let query = sb.from('mane_daily_scores').select('id,map_id,division,display_name,carry,team,score,approved_at,related_url')
       .gte('approved_at', start).lt('approved_at', end);
     if (division) query = query.eq('division', division);
     if (mapIds.length) query = query.in('map_id', mapIds);
-    const page = await checked(query.order('approved_at', {ascending: false}).order('id').range(offset, offset + 499));
+    const page = await checked(query.order('approved_at', { ascending: false }).order('id').range(offset, offset + 499));
     rows.push(...page);
     if (page.length < 500) return rows;
   }
 }
 
+function getEffectiveDailyDate() {
+  const { date } = state.maneDaily;
+  if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) return date;
+  if (state.dataSource === 'offline') {
+    return latestOfflineDailyDate(state.maneDailyScores);
+  }
+  return todayInBeijing();
+}
+
 function renderManeDaily() {
-  const {date, division, map} = state.maneDaily;
+  const lang = getLang();
+  const { division, map } = state.maneDaily;
   const today = todayInBeijing();
-  const yesterday = shiftBeijingDay(today, -1);
-  const selectedDate = (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) ? date : today;
-  const dayHint = selectedDate === today ? ' · 今日' : (selectedDate === yesterday ? ' · 昨日' : '');
-  const mapOptions = state.maneMaps.map((m) => [m.id, `${m.edition} · ${m.name}`]);
+  const yesterday = shiftBeijingDay(today, -1, lang);
+  const selectedDate = getEffectiveDailyDate();
+  const divLabels = divisionLabelsMap(lang);
+  const mapOptions = state.maneMaps.map((m) => [m.id, `${m.edition} · ${displayBossName(m.name, lang)}`]);
+  const offlineExportBtn = state.dataSource === 'offline'
+    ? `<button type="button" class="paper-btn btn-export-offline" data-action="export-offline-excel">${esc(t('btnExportExcel', {}, lang))}</button>`
+    : '';
+
+  // Active Beijing dates ribbon (up to 8 newest dates from state.maneDailyScores)
+  const dateCounts = new Map();
+  for (const row of state.maneDailyScores || []) {
+    const bt = beijingTime(row?.approved_at);
+    const day = bt ? bt.slice(0, 10) : '';
+    if (!day) continue;
+    dateCounts.set(day, (dateCounts.get(day) || 0) + 1);
+  }
+  const activeDates = [...dateCounts.entries()]
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .slice(0, 8);
+
+  const activeDatesBarHtml = activeDates.length
+    ? `<div class="daily-dates-bar" role="group" aria-label="${esc(t('dailyActiveDates', {}, lang))}">
+         <span style="font-family:var(--font-display);font-size:10px;letter-spacing:0.12em;color:var(--brass);text-transform:uppercase;flex-shrink:0">${esc(t('dailyActiveDates', {}, lang))}</span>
+         ${activeDates.map(([d, cnt]) => `
+           <button type="button" class="daily-date-chip ${d === selectedDate ? 'active' : ''}" data-mane-daily-date="${esc(d)}">
+             <span>${esc(d)}</span>
+             <small style="opacity:0.78">(${cnt})</small>
+           </button>`).join('')}
+       </div>`
+    : '';
+
   return `<section class="board-panel">
     <div class="board-header">
       <div class="board-title-stack">
-        <h2>每日新分</h2>
-        <p class="board-subtitle">${selectedDate}（北京时间${dayHint}）审核通过的成绩</p>
+        <h2>${esc(t('dailyTitle', {}, lang))}</h2>
+        <p class="board-subtitle">${esc(t('dailySubtitle', {}, lang))}${state.dataSource === 'offline' ? ` · ${esc(t('dailyOfflineHint', {}, lang))}` : ''}</p>
       </div>
-      <button type="button" class="outline-btn" data-action="refresh-mane-daily">刷新</button>
+      <div class="board-header-right">
+        ${offlineExportBtn}
+        <button type="button" class="outline-btn" data-action="refresh-mane-daily">${esc(t('btnRefresh', {}, lang))}</button>
+      </div>
     </div>
     <div class="daily-filter-grid">
-      <div class="field"><label for="maneDailyDate">日期（北京时间）</label>
+      <div class="field"><label for="maneDailyDate">${esc(t('dailyDateLabel', {}, lang))}</label>
         <div class="daily-date-controls">
-          <button type="button" class="daily-quick-btn ${selectedDate === today ? 'active' : ''}" data-mane-daily-date="${today}">今天</button>
-          <button type="button" class="daily-quick-btn ${selectedDate === yesterday ? 'active' : ''}" data-mane-daily-date="${yesterday}">昨天</button>
-          <input id="maneDailyDate" type="date" data-mane-daily="date" value="${selectedDate}" max="${today}" aria-label="选择北京时间日期" />
+          <button type="button" class="daily-quick-btn ${selectedDate === today ? 'active' : ''}" data-mane-daily-date="${today}">${esc(t('dailyToday', {}, lang))}</button>
+          <button type="button" class="daily-quick-btn ${selectedDate === yesterday ? 'active' : ''}" data-mane-daily-date="${yesterday}">${esc(t('dailyYesterday', {}, lang))}</button>
+          <input id="maneDailyDate" type="date" data-mane-daily="date" value="${selectedDate}" max="${today}" aria-label="${esc(t('dailyDateLabel', {}, lang))}" />
         </div>
       </div>
-      <div class="field"><label for="maneDailyDivision">塑造</label>
-        <select id="maneDailyDivision" data-mane-daily="division">${optionsHtml([['', '全部塑造'], ...Object.entries(DIVISIONS)], division)}</select>
+      <div class="field"><label for="maneDailyDivision">${esc(t('fieldDivision', {}, lang))}</label>
+        <select id="maneDailyDivision" data-mane-daily="division">${optionsHtml([['', t('dailyAllDivisions', {}, lang)], ...Object.entries(divLabels)], division)}</select>
       </div>
-      <div class="field"><label for="maneDailyMap">关卡</label>
-        <select id="maneDailyMap" data-mane-daily="map">${optionsHtml([['', '全部关卡'], ...mapOptions], map)}</select>
+      <div class="field"><label for="maneDailyMap">${esc(t('fieldBoss', {}, lang))}</label>
+        <select id="maneDailyMap" data-mane-daily="map">${optionsHtml([['', t('dailyAllMaps', {}, lang)], ...mapOptions], map)}</select>
       </div>
     </div>
-    <div id="maneDailyResults" data-date="${selectedDate}" aria-live="polite"><p class="board-foot">${state.loading ? '正在连接档案库…' : '正在读取成绩…'}</p></div>
+    ${activeDatesBarHtml}
+    <div id="maneDailyResults" data-date="${selectedDate}" aria-live="polite"><p class="board-foot">${esc(state.loading ? t('emptyTitleLoading', {}, lang) : t('dailyLoading', {}, lang))}</p></div>
   </section>`;
 }
 
 async function fillManeDailyResults(host) {
+  const lang = getLang();
   if (!state.connected) {
-    if (!state.loading) host.textContent = '暂时无法连接档案库。';
+    if (!state.loading) host.textContent = t('offlineSyncFail', {}, lang);
     return;
   }
   const seq = ++maneDailyLoadSeq;
   const selectedDate = host.dataset.date;
-  const {division, map} = state.maneDaily;
+  const { division, map } = state.maneDaily;
   try {
-    const rows = await loadManeDailyRows({date: selectedDate, division, mapIds: map ? [map] : []});
+    const rows = await loadManeDailyRows({ date: selectedDate, division, mapIds: map ? [map] : [] });
     if (!host.isConnected || seq !== maneDailyLoadSeq) return;
     if (!rows.length) {
-      host.innerHTML = '<div class="empty-state"><h3>当天暂无符合条件的成绩</h3></div>';
+      host.innerHTML = `<div class="empty-state"><h3>${esc(t('dailyEmpty', {}, lang))}</h3></div>`;
       return;
     }
 
@@ -1992,7 +3623,7 @@ async function fillManeDailyResults(host) {
 
     const extraBuildsById = new Map();
     const missingIds = rows.filter((r) => !scoreById.has(r.id)).map((r) => r.id);
-    if (missingIds.length) {
+    if (missingIds.length && state.dataSource === 'live' && sb) {
       try {
         for (let i = 0; i < missingIds.length; i += 200) {
           const chunk = missingIds.slice(i, i + 200);
@@ -2002,23 +3633,26 @@ async function fillManeDailyResults(host) {
           for (const entry of extra || []) extraBuildsById.set(entry.id, entry);
         }
       } catch (err) {
-        console.warn('未能读取部分每日新分心相与共鸣配置：', err);
+        console.warn('Could not load extra daily builds:', err);
       }
       if (!host.isConnected || seq !== maneDailyLoadSeq) return;
     }
 
     const mapById = new Map(state.maneMaps.map((m) => [m.id, m]));
+    const teamJoiner = isEn(lang) ? ', ' : '、';
     const rowsHtml = rows.map((row) => {
       const mapObj = mapById.get(row.map_id);
       const section = mapObj?.section || 'new';
       const bossAsset = resolveBossAsset(mapObj?.name || '', section);
+      const bossTitle = mapObj ? displayBossName(mapObj.name, lang) : t('modeMane', {}, lang);
+      const bossSub = mapObj ? displayBossSubtitle(mapObj.name, section, lang) : '';
       const liveRow = scoreById.get(row.id);
       const liveRank = rankById.get(row.id) || 0;
       const { psychubes, resonanceCodes } = extractRecordBuilds(liveRow || extraBuildsById.get(row.id) || row);
-      const hasBuilds = psychubes.some(Boolean) || resonanceCodes.some(Boolean);
-      const canonicalCarryText = formatCanonicalCarry(row.carry);
-      const canonicalTeam = (row.team || []).map(canonicalDisplayName);
+      const carryDisplay = displayCarryNames(row.carry, lang);
+      const teamDisplay = (row.team || []).map((n) => displayCharacterName(n, lang));
       const pid = `mane-daily-${row.id}`;
+
       posterIndex.set(pid, {
         mode: 'mane',
         recordId: row.id,
@@ -2027,43 +3661,68 @@ async function fillManeDailyResults(host) {
         mapId: row.map_id,
         division: row.division,
         rank: liveRank,
-        title: mapObj?.name || '鬃毛邮报',
-        bossEn: bossAsset.en,
+        title: bossTitle,
+        bossEn: bossSub,
         bossThumb: bossAsset.thumb,
-        subtitle: `${MANE_SECTIONS[section] || '鬃毛邮报'} · ${DIVISIONS[row.division] || row.division}`,
+        subtitle: `${localizeSection(section, lang)} · ${localizeDivision(row.division, lang)}`,
         player: row.display_name,
-        carry: canonicalCarryText,
+        carry: carryDisplay,
+        rawCarry: row.carry,
         team: row.team,
-        canonicalTeam,
+        displayTeam: teamDisplay,
         psychubes,
         resonanceCodes,
         score: row.score,
         date: beijingTime(row.approved_at),
         related_url: row.related_url
       });
+
+      const colTime = L('Time', '时间', lang);
+      const colBoss = t('fieldBoss', {}, lang);
+      const colDiv = t('fieldDivision', {}, lang);
+      const colPlayer = t('colInvestigator', {}, lang);
+      const colLineup = t('colLineup', {}, lang);
+      const colScore = t('scoreLabel', {}, lang);
+      const colAction = L('Actions', '操作', lang);
+
+      const miniSlots = parseLineupSlots(row.team, row.carry);
+      const miniLineupHtml = miniSlots.some((s) => s.type === 'char' && s.char?.portrait)
+        ? `<div class="daily-mini-lineup" style="margin-top:4px">${miniSlots.slice(0, 4).map((s) => {
+            if (s.type === 'char' && s.char?.portrait) {
+              const cName = displayCharacterName(s.char.name, lang);
+              return `<span class="daily-mini-card" data-open-char="${esc(s.char.name)}" role="button" tabindex="0" style="cursor:pointer" title="${esc(cName)}"><img src="${esc(s.char.portrait)}" alt="${esc(cName)}" loading="eager" decoding="async" /></span>`;
+            }
+            return '';
+          }).join('')}</div>`
+        : '';
+
       return `<tr>
-        <td class="cell-daily-time" data-label="时间">${esc(beijingTime(row.approved_at).split(' ')[1])}</td>
-        <td class="cell-daily-map" data-label="关卡">${esc(mapObj?.name || '')}</td>
-        <td class="cell-daily-div" data-label="塑造">${esc(DIVISIONS[row.division] || row.division)}</td>
-        <td class="cell-daily-player" data-label="玩家">${esc(row.display_name)}</td>
-        <td class="cell-daily-lineup" data-label="阵容"><strong>${esc(canonicalCarryText)}</strong> ${hasBuilds ? '<span class="row-build-tag">心相·共鸣</span>' : ''}<br>${esc(canonicalTeam.join('、'))} ${safeLinkHtml(row.related_url)}</td>
-        <td class="num-col cell-daily-score" data-label="积分"><span class="score-value">${formatScore(row.score)}</span></td>
-        <td class="cell-daily-actions" data-label="操作"><span class="daily-actions-wrap"><button type="button" class="card-trigger daily-action-btn" data-poster="${esc(pid)}">查看</button>${liveRow ? `<button type="button" class="text-link-btn" data-jump-mane-record="${esc(row.id)}" data-jump-section="${esc(section)}" data-jump-map="${esc(row.map_id)}" data-jump-div="${esc(row.division)}">跳榜 ↗</button>` : ''}</span></td>
+        <td class="cell-daily-time" data-label="${esc(colTime)}">${esc(formatApprovedTime(row.approved_at, lang))}</td>
+        <td class="cell-daily-map" data-label="${esc(colBoss)}">${esc(bossTitle)}</td>
+        <td class="cell-daily-div" data-label="${esc(colDiv)}">${esc(localizeDivisionShort(row.division, lang))}</td>
+        <td class="cell-daily-player" data-label="${esc(colPlayer)}"><span class="player-name is-clickable is-player-name" data-open-player="${esc(row.display_name)}" role="button" tabindex="0">${esc(row.display_name)}</span> ${localRecordBadgeHtml(row, lang)}</td>
+        <td class="cell-daily-lineup" data-label="${esc(colLineup)}"><strong>${esc(carryDisplay)}</strong><br>${esc(teamDisplay.join(teamJoiner))} ${safeLinkHtml(row.related_url, t('relatedLink', {}, lang))}${miniLineupHtml}</td>
+        <td class="num-col cell-daily-score" data-label="${esc(colScore)}"><span class="score-value">${formatScore(row.score, lang)}</span></td>
+        <td class="cell-daily-actions" data-label="${esc(colAction)}"><span class="daily-actions-wrap"><button type="button" class="card-trigger daily-action-btn" data-poster="${esc(pid)}">${esc(t('viewCardBtn', {}, lang))}</button>${liveRow ? `<button type="button" class="text-link-btn" data-jump-mane-record="${esc(row.id)}" data-jump-section="${esc(section)}" data-jump-map="${esc(row.map_id)}" data-jump-div="${esc(row.division)}">${esc(t('dailyJumpBtn', {}, lang))}</button>` : ''}</span></td>
       </tr>`;
     }).join('');
 
-    host.innerHTML = `<p class="board-foot">共 ${rows.length} 条已通过成绩</p>
+    host.innerHTML = `<p class="board-foot">${esc(t('dailyCountFoot', { n: rows.length, date: selectedDate }, lang))}</p>
       <div class="table-scroll"><table class="archive-table table-mane-daily">
-        <thead><tr><th>时间</th><th>关卡</th><th>塑造</th><th>玩家</th><th>主 C / 阵容</th><th class="num-col">积分</th><th style="text-align:right">操作</th></tr></thead>
+        <thead><tr><th>${esc(L('Time', '时间', lang))}</th><th>${esc(t('fieldBoss', {}, lang))}</th><th>${esc(t('fieldDivision', {}, lang))}</th><th>${esc(t('colInvestigator', {}, lang))}</th><th>${esc(t('mainDpsLabel', {}, lang))} / ${esc(t('colLineup', {}, lang))}</th><th class="num-col">${esc(t('scoreLabel', {}, lang))}</th><th style="text-align:right">${esc(L('Actions', '操作', lang))}</th></tr></thead>
         <tbody>${rowsHtml}</tbody>
       </table></div>`;
   } catch {
-    if (host.isConnected && seq === maneDailyLoadSeq) host.textContent = '成绩暂时无法读取，请点击刷新。';
+    if (host.isConnected && seq === maneDailyLoadSeq) {
+      host.textContent = L('Unable to load daily scores right now. Click Refresh to try again.', '成绩暂时无法读取，请点击刷新。', lang);
+    }
   }
 }
 
 function renderManeWorkspace() {
+  const lang = getLang();
   if (state.manePage === 'daily') return renderManeDaily();
+
   const newMaps = activeManeMaps('new');
   const rerunMaps = activeManeMaps('rerun');
   const maps = activeManeMaps(state.maneSection);
@@ -2071,42 +3730,39 @@ function renderManeWorkspace() {
 
   const sectionBar = `
     <div class="section-bar">
-      <div class="section-tabs" role="group" aria-label="鬃毛邮报分区">
-        <button class="section-tab-btn ${state.maneSection === 'new' ? 'active' : ''}" data-mane-section="new">
-          <span>${MANE_SECTIONS.new}</span>
+      <div class="section-tabs" role="group" aria-label="${esc(t('sectionLabel', {}, lang))}">
+        <button type="button" class="section-tab-btn ${state.maneSection === 'new' ? 'active' : ''}" data-mane-section="new">
+          <span>${esc(localizeSection('new', lang))}</span>
           <span class="tab-count">${newMaps.length}</span>
         </button>
-        <button class="section-tab-btn ${state.maneSection === 'rerun' ? 'active' : ''}" data-mane-section="rerun">
-          <span>${MANE_SECTIONS.rerun}</span>
+        <button type="button" class="section-tab-btn ${state.maneSection === 'rerun' ? 'active' : ''}" data-mane-section="rerun">
+          <span>${esc(localizeSection('rerun', lang))}</span>
           <span class="tab-count">${rerunMaps.length}</span>
         </button>
       </div>
-      <button class="ghost-btn icon-btn section-refresh-btn" data-action="refresh" title="刷新档案" aria-label="刷新档案"><img class="uttu-micro-icon" src="./assets/uttu/btn_reset.webp" alt="" aria-hidden="true" /><span class="btn-label">刷新档案</span></button>
+      <button type="button" class="ghost-btn icon-btn section-refresh-btn" data-action="refresh" title="${esc(t('btnRefresh', {}, lang))}" aria-label="${esc(t('btnRefresh', {}, lang))}"><img class="uttu-micro-icon" src="./assets/uttu/btn_reset.webp" alt="" aria-hidden="true" /><span class="btn-label">${esc(t('btnRefresh', {}, lang))}</span></button>
     </div>`;
 
-  if (state.manePage === 'rules') {
-    return renderManeRules();
-  }
-
-  if (state.manePage === 'players') {
-    return renderManePlayers();
-  }
-
-  if (state.manePage === 'totals') {
-    return sectionBar + renderManeTotals(maps[0]?.edition || '', maps);
-  }
+  if (state.manePage === 'rules') return renderManeRules();
+  if (state.manePage === 'players') return renderManePlayers();
+  if (state.manePage === 'totals') return sectionBar + renderManeTotals(maps[0]?.edition || '', maps);
 
   const map = maps.find((m) => m.id === state.maneMapId);
-  const mapIndex = Math.max(0, maps.findIndex((m) => m.id === state.maneMapId));
   const bossAsset = resolveBossAsset(map?.name || '', state.maneSection);
-  const bossMech = resolveManeBossMechanics(map?.name || '');
-  const bossEn = bossAsset.en;
+  const bossMech = resolveManeBossMechanics(map?.name || '', lang);
+  const bossTitle = map ? displayBossName(map.name, lang) : t('navScores', {}, lang);
+  const bossSub = map ? displayBossSubtitle(map.name, state.maneSection, lang) : '';
+  const bossTags = map ? displayBossTags(map.name, lang) : [];
+  const bossWikiUrl = map ? resolveBossWikiUrl(map.name, state.maneSection, lang) : '';
   const isWideCutout = bossAsset.hero && bossAsset.hero !== bossAsset.thumb;
 
   const mapCounts = new Map();
+  const mapPeaks = new Map();
   for (const r of state.maneScores) {
     if (r.division === state.maneDivision) {
       mapCounts.set(r.map_id, (mapCounts.get(r.map_id) || 0) + 1);
+      const curBest = mapPeaks.get(r.map_id);
+      if (!curBest || compareManeScore(r, curBest) < 0) mapPeaks.set(r.map_id, r);
     }
   }
 
@@ -2116,9 +3772,9 @@ function renderManeWorkspace() {
   const ranked = state.maneScores
     .filter((r) => r.map_id === state.maneMapId && r.division === state.maneDivision)
     .sort(compareManeScore);
+  const boardPeak = ranked[0] || null;
 
-  // 统一角色 ID 去重后的筛选项（支持「仅看主 C」与「阵容含该角色」）
-  const charEntries = collectBoardCharacters(ranked, state.maneRoleMode, (r) => r.carry);
+  const charEntries = collectBoardCharacters(ranked, state.maneRoleMode, (r) => r.carry, lang);
   const charLabelByKey = new Map(charEntries.map(([k, info]) => [k, info.label]));
   if (state.maneCarry && !charLabelByKey.has(state.maneCarry)) state.maneCarry = '';
 
@@ -2128,7 +3784,7 @@ function renderManeWorkspace() {
     .map((record, idx) => ({ record, rank: idx + 1 }))
     .filter(({ record }) => {
       const targetNames = state.maneRoleMode === 'member'
-        ? (record.team || [])
+        ? extractLineupCharacterNames(record.team, record.carry)
         : splitCarries(record.carry);
       if (state.maneCarry && !targetNames.some((n) => canonicalCharacterKey(n) === state.maneCarry)) {
         return false;
@@ -2146,9 +3802,10 @@ function renderManeWorkspace() {
 
   const rowsHtml = filteredRows.map(({ record, rank }) => {
     const pid = `mane-${record.id}`;
-    const canonicalCarryText = formatCanonicalCarry(record.carry);
-    const canonicalTeam = (record.team || []).map(canonicalDisplayName);
+    const carryDisplay = displayCarryNames(record.carry, lang);
+    const teamDisplay = (record.team || []).map((n) => displayCharacterName(n, lang));
     const { psychubes, resonanceCodes } = extractRecordBuilds(record);
+
     posterIndex.set(pid, {
       mode: 'mane',
       recordId: record.id,
@@ -2156,114 +3813,172 @@ function renderManeWorkspace() {
       mapId: map?.id || state.maneMapId,
       division: state.maneDivision,
       rank,
-      title: map?.name || '鬃毛邮报',
-      bossEn,
+      title: bossTitle,
+      bossEn: bossSub,
       bossThumb: bossAsset.thumb,
-      subtitle: `${MANE_SECTIONS[state.maneSection]} · ${DIVISIONS[state.maneDivision]}`,
+      subtitle: `${localizeSection(state.maneSection, lang)} · ${localizeDivision(state.maneDivision, lang)}`,
       player: record.display_name,
-      carry: canonicalCarryText,
+      carry: carryDisplay,
+      rawCarry: record.carry,
       team: record.team,
-      canonicalTeam,
+      displayTeam: teamDisplay,
       psychubes,
       resonanceCodes,
       score: record.score,
-      date: formatDateTime(record.created_at),
+      date: formatDateTime(record.created_at, lang),
       related_url: record.related_url
     });
+
     const tierClass = rank <= 3 ? `top-${rank} is-podium` : 'is-regular';
     const highlightClass = state.highlightRecordId === pid ? 'is-highlighted' : '';
-    const hasBuilds = psychubes.some(Boolean) || resonanceCodes.some(Boolean);
-    const carryTitleAttr = record.carry.trim() !== canonicalCarryText ? ` title="原填：${esc(record.carry)}"` : '';
+    const localTag = localRecordBadgeHtml(record, lang);
+
     return `
       <article class="rank-row ${tierClass} ${highlightClass}" data-record-row="${esc(pid)}">
-        <div>${renderRankBadge(rank)}</div>
+        <div>${renderRankBadge(rank, lang)}</div>
         <div class="player-cell">
-          <span class="player-name">${esc(record.display_name)}</span>
+          <span class="player-name is-clickable is-player-name" data-open-player="${esc(record.display_name)}" role="button" tabindex="0">${esc(record.display_name)}</span>
           <div class="player-meta">
-            <span title="${esc(formatDateTime(record.created_at))}">${formatMonthDayTime(record.created_at)}</span>
-            ${safeLinkHtml(record.related_url, '视频/攻略 ↗')}
-            ${record.resonance_ten ? resonanceBadge : ''}
-            ${hasBuilds ? '<span class="row-build-tag">心相·共鸣</span>' : ''}
+            <span title="${esc(formatDateTime(record.created_at, lang))}">${esc(formatMonthDayTime(record.created_at, lang))}</span>
+            ${safeLinkHtml(record.related_url, t('videoGuideLink', {}, lang))}
+            ${localTag}
           </div>
         </div>
         <div class="lineup-cell">
-          <div class="carry-line"${carryTitleAttr}>
-            <span>主 C · ${esc(canonicalCarryText)}</span>
+          <div class="carry-line">
+            <span class="carry-label">${esc(t('mainDpsLabel', {}, lang))}</span>
+            <span>${esc(carryDisplay)}</span>
           </div>
-          ${renderFormationHtml(record.team, record.carry)}
+          ${renderFormationHtml(record.team, record.carry, psychubes, lang)}
         </div>
+        ${renderRowIntelColumnHtml({
+          mode: 'mane',
+          record,
+          rank,
+          pid,
+          psychubes,
+          resonanceCodes,
+          boardPeak,
+          mapName: map?.name || '',
+          stageFastest: null,
+          lang
+        })}
         <div class="result-cell">
           <div class="peak-score-ticket">
             <div class="peak-score-text">
-              <span class="peak-label">调查积分</span>
-              <span class="score-value">${formatScore(record.score)}</span>
+              <span class="peak-label">${esc(t('scoreLabel', {}, lang))}</span>
+              <span class="score-value">${formatScore(record.score, lang)}</span>
             </div>
-            ${renderGradeStamp(record.score)}
+            ${renderGradeStamp(record.score, lang)}
           </div>
           <div class="row-actions">
-            <button class="card-trigger" data-poster="${esc(pid)}">查看</button>
+            <button type="button" class="card-trigger" data-poster="${esc(pid)}">${esc(t('viewCardBtn', {}, lang))}</button>
           </div>
         </div>
       </article>`;
   }).join('');
 
   const boardCountText = hasFilter
-    ? `符合条件 ${filteredRows.length} 条 / 共 ${ranked.length} 条`
-    : `${DIVISIONS[state.maneDivision]} · 共 ${ranked.length} 条`;
+    ? `${filteredRows.length} / ${ranked.length}`
+    : `${localizeDivisionShort(state.maneDivision, lang)} · ${formatEntries(ranked.length, lang)}`;
 
-  const weaknessLabel = state.maneSection === 'new' ? '弱点' : '优势';
+  const weaknessLabel = state.maneSection === 'new' ? t('weaknessLabel', {}, lang) : t('favoredLabel', {}, lang);
   const weaknessHtml = (bossAsset.weakness || []).length
-    ? `<span class="glance-weakness"><span class="glance-label">${weaknessLabel}</span>${bossAsset.weakness.map((k) => {
+    ? `<span class="glance-weakness"><span class="glance-label">${esc(weaknessLabel)}</span>${bossAsset.weakness.map((k) => {
         const meta = AFFLATUS_META[k];
-        return meta ? `<span class="glance-aff-chip"><img src="${esc(meta.icon)}" alt="" aria-hidden="true" />${esc(meta.label)}</span>` : '';
+        return meta ? `<span class="glance-aff-chip"><img src="${esc(meta.icon)}" alt="" aria-hidden="true" />${esc(localizeAfflatus(k, lang))}</span>` : '';
       }).join('')}</span>`
     : '';
 
+  const thresholdProg = map ? getBossThresholdProgress(map.name, boardPeak?.score || 0, lang) : null;
+  const thresholdSteps = thresholdProg?.thresholds?.length ? thresholdProg.thresholds : [];
+  const selectedAppIdx = (state.maneSelectedAppraisal >= 0 && state.maneSelectedAppraisal < thresholdSteps.length)
+    ? state.maneSelectedAppraisal
+    : -1;
+  const selectedAppStep = selectedAppIdx >= 0 ? thresholdSteps[selectedAppIdx] : null;
+
+  const appraisalStripHtml = thresholdSteps.length
+    ? `<div class="boss-appraisal-strip" title="${esc(t('appraisalClickHint', {}, lang))}">
+         <div class="appraisal-rail">
+           ${thresholdSteps.map((step, i) => `
+             <button type="button" class="appraisal-step ${step.reached ? 'is-cleared' : ''} ${selectedAppIdx === i ? 'is-selected' : ''}" data-select-appraisal="${i}" aria-pressed="${selectedAppIdx === i}" title="${esc(step.scoreLabel)} · ${esc(t('appraisalClickHint', {}, lang))}">
+               <span class="appraisal-roman">${esc(step.roman || toRoman(i + 1))}</span>
+               <span class="appraisal-val">${esc(step.scoreLabel)}</span>
+             </button>`).join('')}
+         </div>
+       </div>
+       ${selectedAppStep ? `
+         <div class="appraisal-callout" role="region" aria-label="${esc(t('appraisalActiveLabel', {}, lang))}">
+           <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
+             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+               <strong>${esc(t('rowAppraisalStage', { roman: selectedAppStep.roman || toRoman(selectedAppIdx + 1) }, lang))} · ${esc(selectedAppStep.scoreLabel)}</strong>
+               ${selectedAppStep.reached ? `<span class="dossier-pill" style="border-color:rgba(130,196,136,0.52);color:#b5ebb9;background:rgba(84,152,92,0.2)">✓ ${esc(t('appraisalClearedBadge', {}, lang))}</span>` : ''}
+             </div>
+             <button type="button" class="text-link-btn" data-action="toggle-mane-mech">${esc(state.maneMechOpen ? t('btnCollapseMech', {}, lang) : t('btnExpandMech', {}, lang))}</button>
+           </div>
+           <p>${highlightMechText(selectedAppStep.desc, lang)}</p>
+         </div>` : ''}`
+    : '';
+
+  const mapAllDivRecords = state.maneScores.filter((r) => r.map_id === state.maneMapId);
   const canResetFilter = Boolean(hasFilter || state.maneRoleMode !== 'carry');
   const activeFilterCount = (state.maneCarry ? 1 : 0) + (state.maneAfflatus ? 1 : 0) + (q ? 1 : 0) + (state.maneRoleMode === 'member' ? 1 : 0);
 
   return `
     ${sectionBar}
     <div class="board-grid">
-      <aside class="sidebar-panel ${state.mobileFilterOpen ? 'is-filter-open' : ''}" aria-label="鬃毛邮报筛选条件">
+      <aside class="sidebar-panel ${state.mobileFilterOpen ? 'is-filter-open' : ''}" aria-label="${esc(t('headingLineupFilter', {}, lang))}">
         <div class="sidebar-dossier-block">
-          ${igHeading('调查对象', 'SURVEY', `${DIVISIONS[state.maneDivision]}计数`)}
-          <div class="dossier-list" role="listbox" aria-label="选择调查对象">
+          ${igHeading(t('headingSurvey', {}, lang), t('headingSurveyEn', {}, lang), localizeDivisionShort(state.maneDivision, lang))}
+          <div class="dossier-list" role="listbox" aria-label="${esc(t('headingSurvey', {}, lang))}">
             ${maps.map((m, idx) => {
               const cnt = mapCounts.get(m.id) || 0;
+              const peakRow = mapPeaks.get(m.id);
               const mArt = resolveBossAsset(m.name, state.maneSection);
-              const weakBrief = (mArt.weakness || []).map((k) => AFFLATUS_META[k]?.label).filter(Boolean).join('/');
+              const mTitle = displayBossName(m.name, lang);
+              const affIconsHtml = (mArt.weakness || []).length
+                ? `<span class="dossier-aff-icons">${mArt.weakness.map((k) => {
+                    const meta = AFFLATUS_META[k];
+                    return meta?.icon ? `<img src="${esc(meta.icon)}" alt="${esc(localizeAfflatus(k, lang))}" loading="eager" />` : '';
+                  }).join('')}</span>`
+                : '';
               const subText = m.opens_at
-                ? `${weakBrief ? `弱点:${weakBrief} · ` : ''}${formatMonthDay(m.opens_at)} 开放`
-                : `${weakBrief ? `优势:${weakBrief}` : `${m.edition} 怪相档案`}`;
+                ? t('opensAt', { time: formatMonthDay(m.opens_at, lang) }, lang)
+                : (mArt.version ? `v${mArt.version}` : localizeSection('rerun', lang));
               return `
-                <button class="dossier-item ${m.id === state.maneMapId ? 'active' : ''} ${mArt.thumb ? 'has-boss-bg' : ''}" data-mane-map="${esc(m.id)}" title="${esc(m.name)}（${DIVISIONS[state.maneDivision]}共 ${cnt} 条纪录）">
+                <button type="button" class="dossier-item ${m.id === state.maneMapId ? 'active' : ''} ${mArt.thumb ? 'has-boss-bg' : ''}" data-mane-map="${esc(m.id)}" title="${esc(mTitle)} (${esc(formatEntries(cnt, lang))})">
                   ${mArt.thumb ? `<span class="dossier-boss-art" style="background-image:url('${esc(mArt.thumb)}');background-position:${esc(mArt.pos)}" aria-hidden="true"></span>` : ''}
                   <span class="survey-num-box" aria-hidden="true">${idx + 1}</span>
                   <span class="dossier-main">
-                    <span class="dossier-name">${esc(m.name)}</span>
-                    <span class="dossier-sub">${esc(subText)}</span>
+                    <span class="dossier-name">${esc(mTitle)}</span>
+                    <span class="dossier-meta-line">
+                      ${affIconsHtml}
+                      <span class="dossier-sub">${esc(subText)}</span>
+                    </span>
                   </span>
-                  <span class="dossier-badge">${cnt} 条</span>
+                  <span class="dossier-right-col">
+                    ${peakRow ? `<span class="dossier-peak-preview">${esc(formatCompactScore(peakRow.score, lang))}</span>` : ''}
+                    <span class="dossier-badge">${esc(formatEntries(cnt, lang))}</span>
+                  </span>
                 </button>`;
-            }).join('') || '<p class="sidebar-note">正在读取首领目录…</p>'}
+            }).join('') || `<p class="sidebar-note">${esc(t('emptyTitleLoading', {}, lang))}</p>`}
           </div>
         </div>
 
         <div class="sidebar-portrayal-block">
-          ${igHeading('塑造分组', 'PORTRAYAL')}
+          ${igHeading(t('headingPortrayal', {}, lang), t('headingPortrayalEn', {}, lang))}
           <div class="portrayal-control-row">
             <div class="segmented-toggle">
-              <button class="seg-btn ${state.maneDivision === 'zero' ? 'active' : ''}" data-mane-div="zero">
-                <span>全 0 塑造</span><small>${zeroCount} 条纪录</small>
+              <button type="button" class="seg-btn ${state.maneDivision === 'zero' ? 'active' : ''}" data-mane-div="zero">
+                <span>${esc(localizeDivision('zero', lang))}</span><small>${esc(formatEntries(zeroCount, lang))}</small>
               </button>
-              <button class="seg-btn ${state.maneDivision === 'max' ? 'active' : ''}" data-mane-div="max">
-                <span>全满塑造</span><small>${maxCount} 条纪录</small>
+              <button type="button" class="seg-btn ${state.maneDivision === 'max' ? 'active' : ''}" data-mane-div="max">
+                <span>${esc(localizeDivision('max', lang))}</span><small>${esc(formatEntries(maxCount, lang))}</small>
               </button>
             </div>
             <button type="button" class="mobile-filter-toggle ${state.mobileFilterOpen ? 'open' : ''} ${activeFilterCount ? 'has-active' : ''}" data-action="toggle-mobile-filter" aria-expanded="${state.mobileFilterOpen}">
               <img class="uttu-micro-icon" src="./assets/uttu/btn_search.webp" alt="" aria-hidden="true" />
-              <span>筛选${activeFilterCount ? ` (${activeFilterCount})` : ''}</span>
+              <span>${esc(t('mobileFilterBtn', {}, lang))}${activeFilterCount ? ` (${activeFilterCount})` : ''}</span>
               <span class="filter-caret" aria-hidden="true">${state.mobileFilterOpen ? '▴' : '▾'}</span>
             </button>
           </div>
@@ -2273,172 +3988,225 @@ function renderManeWorkspace() {
           <div class="ig-heading">
             <span class="ig-heading-left">
               <span class="ig-tri" aria-hidden="true">▶</span>
-              <span class="ig-cn">阵容筛选</span>
+              <span class="ig-cn">${esc(t('headingLineupFilter', {}, lang))}</span>
               <span class="ig-bar" aria-hidden="true"></span>
-              <span class="ig-en">LINEUP FILTER</span>
+              <span class="ig-en">${esc(t('headingLineupFilterEn', {}, lang))}</span>
             </span>
-            <button type="button" class="filter-reset-btn" data-action="reset-mane-filter" ${canResetFilter ? '' : 'disabled'} title="清空所有阵容筛选条件">
+            <button type="button" class="filter-reset-btn" data-action="reset-mane-filter" ${canResetFilter ? '' : 'disabled'} title="${esc(t('clearFilter', {}, lang))}">
               <img src="./assets/uttu/btn_reset.webp" alt="" aria-hidden="true" />
-              <span>重置</span>
+              <span>${esc(t('resetFilter', {}, lang))}</span>
             </button>
           </div>
 
-          <div class="role-mode-toggle" role="group" aria-label="角色筛选口径">
-            <button type="button" class="role-pill ${state.maneRoleMode === 'carry' ? 'active' : ''}" data-mane-role="carry">仅看主 C</button>
-            <button type="button" class="role-pill ${state.maneRoleMode === 'member' ? 'active' : ''}" data-mane-role="member">阵容含该角色</button>
+          <div class="role-mode-toggle" role="group" aria-label="${esc(t('headingLineupFilter', {}, lang))}">
+            <button type="button" class="role-pill ${state.maneRoleMode === 'carry' ? 'active' : ''}" data-mane-role="carry">${esc(t('roleCarryOnly', {}, lang))}</button>
+            <button type="button" class="role-pill ${state.maneRoleMode === 'member' ? 'active' : ''}" data-mane-role="member">${esc(t('roleAnyMember', {}, lang))}</button>
           </div>
 
           <div class="field" style="margin-bottom:8px">
-            <select id="maneCarrySelect" class="filter-select" aria-label="${state.maneRoleMode === 'carry' ? '按主 C 角色筛选' : '按上阵角色筛选'}">
-              <option value="">${state.maneRoleMode === 'carry' ? `全部主 C（${charEntries.length}）` : `全部上阵角色（${charEntries.length}）`}</option>
-              ${optionsHtml(charEntries.map(([k, info]) => [k, `${info.label}（${info.count}）`]), state.maneCarry)}
+            <select id="maneCarrySelect" class="filter-select" aria-label="${esc(state.maneRoleMode === 'carry' ? t('allCarriesOption', {}, lang) : t('allMembersOption', {}, lang))}">
+              <option value="">${esc(state.maneRoleMode === 'carry' ? `${t('allCarriesOption', {}, lang)} (${charEntries.length})` : `${t('allMembersOption', {}, lang)} (${charEntries.length})`)}</option>
+              ${optionsHtml(charEntries.map(([k, info]) => [k, `${info.label} (${info.count})`]), state.maneCarry)}
             </select>
           </div>
 
-          ${renderAfflatusFilterHtml(state.maneAfflatus, 'data-mane-aff')}
+          ${renderAfflatusFilterHtml(state.maneAfflatus, 'data-mane-aff', lang)}
 
           <div class="search-input-wrap">
             <img class="search-input-icon" src="./assets/uttu/btn_search.webp" alt="" aria-hidden="true" />
-            <input id="maneSearchInput" class="filter-input has-icon" type="search" placeholder="搜索调查员、角色名或简称…" value="${esc(state.maneQuery)}" aria-label="搜索调查员或角色" />
+            <input id="maneSearchInput" class="filter-input has-icon" type="search" placeholder="${esc(t('searchPlaceholderMane', {}, lang))}" value="${esc(state.maneQuery)}" aria-label="${esc(t('searchPlaceholderMane', {}, lang))}" />
           </div>
         </div>
 
+        ${renderSidebarMetaWidget(ranked, (r) => r.carry, state.maneCarry, 'mane', lang)}
+
         <div class="sidebar-note">
-          同图、同组、同完整配队仅保留最高分；异体/简称写法已按统一角色 ID 自动关联。
-          ${state.maneSection === 'rerun' ? '<br/>复刻目录参考 Wiki 往期首领，可挑战地图以游戏内「怪相档案」为准。' : ''}
+          ${esc(state.maneSection === 'rerun' ? t('sidebarNoteRerun', {}, lang) : t('sidebarNoteMane', {}, lang))}
         </div>
       </aside>
 
-      <section class="board-panel" aria-label="鬃毛邮报调查积分榜">
+      <section class="board-panel" aria-label="${esc(t('maneTitle', {}, lang))}">
         <div class="board-header ${bossAsset.thumb ? 'has-boss-art' : ''}">
+          <span class="boss-stamp-edge" aria-hidden="true"></span>
           ${bossAsset.thumb ? `<div class="boss-header-backdrop" style="background-image:url('${esc(bossAsset.thumb)}');background-position:${esc(bossAsset.pos)}" aria-hidden="true"></div>` : ''}
+          <span class="boss-wanted-wm" aria-hidden="true">WANTED</span>
           ${isWideCutout ? `<img class="boss-header-cutout" src="${esc(bossAsset.hero)}" alt="" aria-hidden="true" loading="eager" decoding="async" />` : ''}
           <div class="boss-header-scrim" aria-hidden="true"></div>
           <div class="board-title-stack">
+            <div class="boss-tips-row">
+              <span class="boss-tips-label">${esc(t('tipsLabel', {}, lang))}</span>
+              ${weaknessHtml}
+              ${bossTags.map((tag) => `<span class="tip-paper-tag">${esc(tag)}</span>`).join('')}
+            </div>
             <div class="boss-headline-wrap">
-              <h2>${esc(map?.name || '调查积分榜')}</h2>
-              <span class="boss-en-sub">${esc(bossEn)}</span>
+              <h2>${esc(bossTitle)}</h2>
+              ${bossSub ? `<span class="boss-en-sub">${esc(bossSub)}</span>` : ''}
             </div>
             <div class="boss-quick-glance">
-              ${weaknessHtml}
-              ${(bossAsset.tags || []).length ? `<span class="glance-tags">${esc(bossAsset.tags.join(' / '))}</span>` : ''}
-              <span class="glance-meta">${bossMech?.turns ? `${bossMech.turns} 回合` : ''}${map?.opens_at ? ` · ${formatMonthDay(map.opens_at)} 开放` : ''}</span>
-              ${bossMech ? `<button type="button" class="mech-toggle-btn ${state.maneMechOpen ? 'active' : ''}" data-action="toggle-mane-mech" aria-expanded="${state.maneMechOpen}">${state.maneMechOpen ? '收起首领机制 ▴' : '查看首领机制 ▾'}</button>` : ''}
-              ${state.maneCarry ? `<span class="glance-active-chip">${state.maneRoleMode === 'carry' ? '主 C' : '含角色'}：${esc(charLabelByKey.get(state.maneCarry) || '')}</span>` : ''}
-              ${state.maneAfflatus ? `<span class="glance-active-chip">灵感：${esc(AFFLATUS_META[state.maneAfflatus]?.label || '')}</span>` : ''}
-              ${hasFilter ? '<button type="button" class="glance-clear-btn" data-action="reset-mane-filter">✕ 清空筛选</button>' : ''}
+              <span class="glance-meta">${bossMech?.turns ? esc(formatRounds(bossMech.turns, lang)) : ''}${map?.opens_at ? ` · ${esc(t('opensAt', { time: formatMonthDay(map.opens_at, lang) }, lang))}` : ''}</span>
+              ${bossMech ? `<button type="button" class="mech-toggle-btn ${state.maneMechOpen ? 'active' : ''}" data-action="toggle-mane-mech" aria-expanded="${state.maneMechOpen}">${esc(state.maneMechOpen ? t('btnCollapseMech', {}, lang) : t('btnExpandMech', {}, lang))}</button>` : ''}
+              ${bossWikiUrl ? `<a class="text-link-btn" href="${esc(bossWikiUrl)}" target="_blank" rel="noopener noreferrer">${esc(t('bossWikiLink', {}, lang))}</a>` : ''}
+              ${state.maneCarry ? `<span class="glance-active-chip">${esc(state.maneRoleMode === 'carry' ? t('mainDpsLabel', {}, lang) : t('roleAnyMember', {}, lang))}: ${esc(charLabelByKey.get(state.maneCarry) || '')}</span>` : ''}
+              ${state.maneAfflatus ? `<span class="glance-active-chip">${esc(localizeAfflatus(state.maneAfflatus, lang))}</span>` : ''}
+              ${hasFilter ? `<button type="button" class="glance-clear-btn" data-action="reset-mane-filter">✕ ${esc(t('clearFilter', {}, lang))}</button>` : ''}
             </div>
+            ${appraisalStripHtml}
           </div>
-          <div class="board-header-right">
-            <span class="count-tag ${hasFilter ? 'is-filtered' : ''}">${esc(boardCountText)}</span>
-            ${state.connected && isMapOpen(map) ? '<button class="paper-btn" data-action="open-submit">投稿此图</button>' : ''}
+          <div class="boss-peak-widget">
+            <div class="boss-peak-eyebrow">
+              <span>${esc(t('bossPeakLabel', {}, lang))}</span>
+              <span class="boss-peak-count">${esc(boardCountText)}</span>
+            </div>
+            ${boardPeak
+              ? `<div class="peak-score-ticket">
+                   <div class="peak-score-text">
+                     <span class="peak-label is-player-name">${esc(boardPeak.display_name)}</span>
+                     <span class="score-value">${formatScore(boardPeak.score, lang)}</span>
+                   </div>
+                   ${renderGradeStamp(boardPeak.score, lang)}
+                 </div>`
+              : `<div class="peak-score-ticket"><div class="peak-score-text"><span class="peak-label">${esc(t('emptyTitleEmpty', {}, lang))}</span><span class="score-value">—</span></div></div>`
+            }
+            <div class="boss-peak-actions">
+              ${state.connected && isMapOpen(map) ? `<button type="button" class="paper-btn boss-submit-btn" data-action="open-submit">${esc(t('submitThisBoss', {}, lang))}</button>` : ''}
+            </div>
           </div>
         </div>
 
-        ${renderManeBossMechanicsDrawer(bossMech)}
+        ${renderManeBossMechanicsDrawer(bossMech, lang)}
+
+        ${renderBoardIntelBar('mane', ranked, mapAllDivRecords, lang)}
 
         ${filteredRows.length
           ? `<div class="rank-list">
                <div class="rank-list-head">
-                 <span>名次</span><span>调查员</span><span>主 C 与上阵阵容</span><span class="col-right">调查积分 / 评级</span>
+                 <span>${esc(t('colRank', {}, lang))}</span><span>${esc(t('colInvestigator', {}, lang))}</span><span>${esc(t('colLineup', {}, lang))}</span><span>${esc(t('colTactical', {}, lang))}</span><span class="col-right">${esc(t('colScoreGrade', {}, lang))}</span>
                </div>
                ${rowsHtml}
              </div>`
           : `<div class="empty-state">
                <span class="empty-glyph">✦</span>
-               <h3>${state.loading ? '正在检索档案库…' : (ranked.length ? '无匹配的筛选结果' : '暂无审核通过的成绩')}</h3>
-               <p>${ranked.length ? '可尝试点击左侧「重置」清空筛选条件。' : '成为该首领与塑造分组的首位纪录保持者。'}</p>
-               ${ranked.length ? '<button class="outline-btn" data-action="reset-mane-filter">重置筛选条件</button>' : (state.connected && isMapOpen(map) ? '<button class="copper-btn" data-action="open-submit">立即投稿成绩</button>' : '')}
+               <h3>${esc(state.loading ? t('emptyTitleLoading', {}, lang) : (ranked.length ? t('emptyTitleFiltered', {}, lang) : t('emptyTitleEmpty', {}, lang)))}</h3>
+               <p>${esc(ranked.length ? t('emptyDescFiltered', {}, lang) : t('emptyDescMane', {}, lang))}</p>
+               ${ranked.length ? `<button type="button" class="outline-btn" data-action="reset-mane-filter">${esc(t('clearFilter', {}, lang))}</button>` : (state.connected && isMapOpen(map) ? `<button type="button" class="copper-btn" data-action="open-submit">${esc(t('emptyActionSubmit', {}, lang))}</button>` : '')}
              </div>`
         }
+        <div class="board-foot">
+          <span>${esc(t('boardFootMane', {}, lang))}</span>
+        </div>
       </section>
     </div>`;
 }
 
 function renderManeTotals(latestEdition, sectionMaps = []) {
+  const lang = getLang();
   const editionKey = state.maneSection === 'new' ? latestEdition : '';
   const totalMapsCount = sectionMaps.length;
-  const mapNamesPreview = state.maneSection === 'new'
-    ? sectionMaps.map((m) => `「${m.name}」`).join('、')
-    : `全部 ${totalMapsCount} 张怪相档案复刻首领图`;
+  const rows = rankManeCarryTotals(state.maneTotals, state.maneSection, editionKey, state.maneDivision, null, lang);
+  const teamJoiner = isEn(lang) ? ', ' : '、';
+  const offlineExportBtn = state.dataSource === 'offline'
+    ? `<button type="button" class="paper-btn btn-export-offline" data-action="export-offline-excel">${esc(t('btnExportExcel', {}, lang))}</button>`
+    : '';
 
-  const rows = rankManeCarryTotals(state.maneTotals, state.maneSection, editionKey, state.maneDivision);
+  const maxTotalNum = rows.length ? Math.max(1, Number(rows[0].total || 1n)) : 1;
 
   return `
     <div class="board-panel">
       <div class="board-header">
         <div class="board-title-stack">
-          <div class="board-survey-tag"><span>AGGREGATE REPORT · 主 C 总分汇总</span></div>
+          <div class="board-survey-tag"><span>${esc(t('totalsEyebrow', {}, lang))}</span></div>
           <div class="boss-headline-wrap">
-            <h2>主 C 调查总分榜</h2>
-            <span class="boss-en-sub">Carry Aggregate Score</span>
+            <h2>${esc(t('totalsTitle', {}, lang))}</h2>
+            <span class="boss-en-sub">${esc(localizeSection(state.maneSection, lang))}</span>
           </div>
           <div class="paper-tag-row">
-            <span class="paper-tag">${DIVISIONS[state.maneDivision]}</span>
-            <span class="paper-tag dark">${esc(MANE_SECTIONS[state.maneSection])} · 共 ${totalMapsCount} 张图</span>
+            <span class="paper-tag">${esc(localizeDivision(state.maneDivision, lang))}</span>
+            <span class="paper-tag dark">${esc(formatBossCount(totalMapsCount, lang))}</span>
           </div>
         </div>
         <div class="board-header-right">
+          ${offlineExportBtn}
           <div class="segmented-toggle" style="min-width:210px">
-            <button class="seg-btn ${state.maneDivision === 'zero' ? 'active' : ''}" data-mane-div="zero"><span>全 0 塑造</span></button>
-            <button class="seg-btn ${state.maneDivision === 'max' ? 'active' : ''}" data-mane-div="max"><span>全满塑造</span></button>
+            <button type="button" class="seg-btn ${state.maneDivision === 'zero' ? 'active' : ''}" data-mane-div="zero"><span>${esc(localizeDivision('zero', lang))}</span></button>
+            <button type="button" class="seg-btn ${state.maneDivision === 'max' ? 'active' : ''}" data-mane-div="max"><span>${esc(localizeDivision('max', lang))}</span></button>
           </div>
         </div>
       </div>
 
       <div class="totals-methodology">
-        <div class="method-item"><strong>纳入范围：</strong>${esc(mapNamesPreview || '当前分区所有首领图')}。</div>
-        <div class="method-item"><strong>缺图计分：</strong>某图暂无该主 C 的已审核成绩时按 <code>0</code> 分计入总分，并在明细标注「已收录 X / ${totalMapsCount || '—'} 张」。</div>
-        <div class="method-item"><strong>双主 C 与异名合并：</strong>共同主 C（如 <code>A/B</code>）拆分后各自按单图最高分独立归属；异体/简称写法按统一角色 ID 自动去重合并。</div>
+        <div class="method-item">${esc(t('totalsMethodScope', {}, lang))}</div>
+        <div class="method-item">${esc(t('totalsMethodZero', {}, lang))}</div>
+        <div class="method-item">${esc(t('totalsMethodMerge', {}, lang))}</div>
       </div>
 
       ${rows.length
         ? `<div class="table-scroll">
             <table class="archive-table table-mane-totals">
-              <thead><tr><th style="width:76px">名次</th><th>主 C 角色</th><th>各图最高分明细</th><th class="num-col">调查总分</th></tr></thead>
+              <thead><tr><th style="width:76px">${esc(t('colRank', {}, lang))}</th><th>${esc(t('mainDpsLabel', {}, lang))}</th><th>${esc(L('Per-Boss Best Breakdown', '各图最高分明细', lang))}</th><th class="num-col">${esc(L('Total Score', '调查总分', lang))}</th></tr></thead>
               <tbody>
-                ${rows.map((row, idx) => `
+                ${rows.map((row, idx) => {
+                  const barPct = Math.min(100, Math.max(4, Math.round((Number(row.total || 0n) / maxTotalNum) * 100)));
+                  return `
                     <tr>
-                      <td class="cell-rank">${renderRankBadge(idx + 1)}</td>
+                      <td class="cell-rank">${renderRankBadge(idx + 1, lang)}</td>
                       <td class="cell-entity">
-                        <button type="button" class="entity-jump-btn" data-jump-mane-carry="${esc(row.carry_key)}" data-jump-carry-name="${esc(row.carry_name)}" data-jump-map="${esc(row.map_scores?.[0]?.map_id || '')}" title="点击跳转并筛选主 C：${esc(row.carry_name)}">
-                          ${renderCarryAvatarHtml(row.carry_name)}
-                          <span style="min-width:0">
-                            <strong style="font-family:var(--font-serif);font-size:15px">${esc(row.carry_name)}</strong>
-                          </span>
-                          <span class="entity-jump-arrow" aria-hidden="true">↗</span>
-                        </button>
+                        <div style="display:flex;align-items:center;gap:6px">
+                          <span data-open-char="${esc(row.carry_cn || row.carry_name)}" role="button" tabindex="0" style="cursor:pointer;display:inline-flex" title="${esc(row.carry_name)}">${renderCarryAvatarHtml(row.carry_cn || row.carry_name, lang)}</span>
+                          <button type="button" class="entity-jump-btn" data-jump-mane-carry="${esc(row.carry_key)}" data-jump-carry-name="${esc(row.carry_name)}" data-jump-map="${esc(row.map_scores?.[0]?.map_id || '')}" title="${esc(row.carry_name)}">
+                            <span style="min-width:0">
+                              <strong style="font-family:var(--font-serif);font-size:15px">${esc(row.carry_name)}</strong>
+                            </span>
+                            <span class="entity-jump-arrow" aria-hidden="true">↗</span>
+                          </button>
+                        </div>
                       </td>
                       <td class="cell-detail">
                         <details class="map-breakdown">
-                          <summary>已收录 ${row.map_count}${totalMapsCount ? ` / ${totalMapsCount}` : ''} 张首领图（点击展开各图纪录）</summary>
+                          <summary>${esc(t('totalsBreakdownSummary', { count: row.map_count }, lang))}${totalMapsCount ? ` / ${totalMapsCount}` : ''}</summary>
                           <ul>
-                            ${(row.map_scores || []).map((m) => `
+                            ${(row.map_scores || []).map((m) => {
+                              const bArt = resolveBossAsset(m.name, state.maneSection);
+                              return `
                               <li>
-                                <strong>${esc(m.name)}</strong> · <span style="display:inline;color:var(--copper-bright)">${formatScore(m.score)}</span>
-                                <button type="button" class="text-link-btn" style="margin-left:8px" data-jump-mane-carry="${esc(row.carry_key)}" data-jump-carry-name="${esc(row.carry_name)}" data-jump-map="${esc(m.map_id)}">看此图 ↗</button>
-                                <span>调查员：${esc(m.player)} · 配队：${esc((m.team || []).map(canonicalDisplayName).join('、'))}</span>
-                              </li>`).join('')}
+                                ${bArt?.thumb ? `<img class="breakdown-boss-thumb" src="${esc(bArt.thumb)}" alt="" aria-hidden="true" loading="eager" />` : ''}
+                                <strong>${esc(displayBossName(m.name, lang))}</strong> · <span style="display:inline;color:var(--copper-bright)">${formatScore(m.score, lang)}</span>
+                                <button type="button" class="text-link-btn" style="margin-left:8px" data-jump-mane-carry="${esc(row.carry_key)}" data-jump-carry-name="${esc(row.carry_name)}" data-jump-map="${esc(m.map_id)}">${esc(t('totalsWatchMap', {}, lang))}</button>
+                                <span>${esc(t('colInvestigator', {}, lang))}: <em class="is-player-name" style="font-style:normal">${esc(m.player)}</em> · ${esc((m.team || []).map((n) => displayCharacterName(n, lang)).join(teamJoiner))}</span>
+                              </li>`;
+                            }).join('')}
                           </ul>
                         </details>
                       </td>
-                      <td class="num-col cell-primary" data-label="调查总分"><span class="score-value">${formatScore(row.total)}</span></td>
-                    </tr>`).join('')}
+                      <td class="num-col cell-primary" data-label="${esc(L('Total Score', '调查总分', lang))}">
+                        <span class="score-value">${formatScore(row.total, lang)}</span>
+                        <div class="totals-bar-track"><div class="totals-bar-fill" style="width:${barPct}%"></div></div>
+                      </td>
+                    </tr>`;
+                }).join('')}
               </tbody>
             </table>
           </div>`
-        : `<div class="empty-state"><span class="empty-glyph">✦</span><h3>暂无可汇总成绩</h3><p>该分区与塑造分组下尚无已审核通过的纪录。</p></div>`
+        : `<div class="empty-state"><span class="empty-glyph">✦</span><h3>${esc(t('totalsEmpty', {}, lang))}</h3></div>`
       }
       <div class="board-foot">
-        <span>${DIVISIONS[state.maneDivision]} · 共 ${rows.length} 位主 C 上榜</span>
-        <span>单图缺席按 0 分计</span>
+        <span>${esc(localizeDivision(state.maneDivision, lang))} · ${esc(formatEntries(rows.length, lang))}</span>
       </div>
     </div>`;
 }
 
 function renderManePlayers() {
-  const scopes = { all: '全部首领汇总', new: '鉴藏者特版', rerun: '怪相档案' };
-  const divs = { all: '全部分组', zero: '全 0 塑造', max: '全满塑造' };
+  const lang = getLang();
+  const locale = isEn(lang) ? 'en' : 'zh-CN';
+  const scopes = {
+    all: t('playersScopeAll', {}, lang),
+    new: t('playersScopeNew', {}, lang),
+    rerun: t('playersScopeRerun', {}, lang)
+  };
+  const divs = {
+    all: t('playersDivAll', {}, lang),
+    zero: localizeDivision('zero', lang),
+    max: localizeDivision('max', lang)
+  };
 
   const newMaps = activeManeMaps('new');
   const rerunMaps = activeManeMaps('rerun');
@@ -2449,7 +4217,6 @@ function renderManePlayers() {
       : [...newMaps, ...rerunMaps];
   const mapById = new Map(scopedMaps.map((m) => [m.id, m]));
 
-  // 先按每张图 × 塑造组计算精确名次，再聚合到各调查员名下
   const boardGroups = new Map();
   for (const rec of state.maneScores) {
     if (!mapById.has(rec.map_id)) continue;
@@ -2475,28 +4242,37 @@ function renderManePlayers() {
           podiumCount: 0,
           bestScore: 0n,
           bestLabel: '',
+          carryCounts: new Map(),
           entries: []
         };
         playersMap.set(pKey, p);
       }
       const map = mapById.get(rec.map_id);
+      const mapLabel = map ? displayBossName(map.name, lang) : t('modeMane', {}, lang);
       const score = BigInt(rec.score || 0);
       p.recordCount += 1;
       if (rank === 1) p.firstCount += 1;
       if (rank <= 3) p.podiumCount += 1;
+      for (const rawC of splitCarries(rec.carry)) {
+        const ch = resolveCharacter(rawC);
+        if (!ch) continue;
+        const cur = p.carryCounts.get(ch.id);
+        if (cur) cur.count += 1;
+        else p.carryCounts.set(ch.id, { char: ch, count: 1 });
+      }
       if (score > p.bestScore) {
         p.bestScore = score;
-        p.bestLabel = `${map?.name || ''} · ${DIVISIONS[rec.division]}`;
+        p.bestLabel = `${mapLabel} · ${localizeDivisionShort(rec.division, lang)}`;
       }
       p.entries.push({
         id: rec.id,
         section: map?.section || 'new',
         mapId: rec.map_id,
-        mapName: map?.name || '未知首领',
+        mapName: mapLabel,
         division: rec.division,
         rank,
         score,
-        carry: formatCanonicalCarry(rec.carry)
+        carry: displayCarryNames(rec.carry, lang)
       });
     });
   }
@@ -2504,6 +4280,7 @@ function renderManePlayers() {
   const rows = [...playersMap.values()]
     .map((p) => {
       p.entries.sort((a, b) => (a.rank - b.rank) || (b.score > a.score ? 1 : b.score < a.score ? -1 : 0));
+      p.favChars = [...p.carryCounts.values()].sort((a, b) => b.count - a.count).slice(0, 3);
       return p;
     })
     .sort((a, b) =>
@@ -2511,19 +4288,19 @@ function renderManePlayers() {
       (b.firstCount - a.firstCount) ||
       (b.podiumCount - a.podiumCount) ||
       (b.bestScore > a.bestScore ? 1 : b.bestScore < a.bestScore ? -1 : 0) ||
-      String(a.name).localeCompare(String(b.name), 'zh-CN')
+      String(a.name).localeCompare(String(b.name), locale)
     );
 
   return `
     <div class="section-bar">
-      <div class="section-tabs" role="group" aria-label="荣誉统计范围">
+      <div class="section-tabs" role="group" aria-label="${esc(t('sectionLabel', {}, lang))}">
         ${Object.entries(scopes).map(([k, lbl]) =>
-          `<button class="section-tab-btn ${k === state.manePlayerScope ? 'active' : ''}" data-mane-player-scope="${k}">${lbl}</button>`
+          `<button type="button" class="section-tab-btn ${k === state.manePlayerScope ? 'active' : ''}" data-mane-player-scope="${k}">${esc(lbl)}</button>`
         ).join('')}
       </div>
-      <div class="section-tabs" role="group" aria-label="塑造分组范围">
+      <div class="section-tabs" role="group" aria-label="${esc(t('fieldDivision', {}, lang))}">
         ${Object.entries(divs).map(([k, lbl]) =>
-          `<button class="outline-btn ${k === state.manePlayerDiv ? 'selected' : ''}" data-mane-player-div="${k}">${lbl}</button>`
+          `<button type="button" class="outline-btn ${k === state.manePlayerDiv ? 'selected' : ''}" data-mane-player-div="${k}">${esc(lbl)}</button>`
         ).join('')}
       </div>
     </div>
@@ -2532,15 +4309,15 @@ function renderManePlayers() {
       <div class="board-header">
         <div class="board-title-stack">
           <div class="boss-headline-wrap">
-            <h2>玩家荣誉殿堂</h2>
-            <span class="boss-en-sub">Mane’s Bulletin Hall of Fame</span>
+            <h2>${esc(t('playersManeTitle', {}, lang))}</h2>
+            <span class="boss-en-sub">Hall of Fame</span>
           </div>
           <div class="paper-tag-row">
-            <span class="paper-tag">${scopes[state.manePlayerScope]}</span>
-            <span class="paper-tag dark">${divs[state.manePlayerDiv]} · 按持榜数 / 榜首次数 / 前三次数 / 最高分排序</span>
+            <span class="paper-tag">${esc(scopes[state.manePlayerScope])}</span>
+            <span class="paper-tag dark">${esc(divs[state.manePlayerDiv])}</span>
           </div>
         </div>
-        <span class="count-tag">${rows.length} 位上榜调查员</span>
+        <span class="count-tag">${esc(formatEntries(rows.length, lang))}</span>
       </div>
 
       ${rows.length
@@ -2548,82 +4325,107 @@ function renderManePlayers() {
             <table class="archive-table table-mane-players">
               <thead>
                 <tr>
-                  <th style="width:70px">名次</th>
-                  <th>调查员</th>
-                  <th>荣誉分布与持榜明细</th>
-                  <th class="num-col">最高单图积分</th>
-                  <th class="num-col" style="width:116px">当前持榜数</th>
+                  <th style="width:70px">${esc(t('colRank', {}, lang))}</th>
+                  <th>${esc(L('Timekeeper', '调查员', lang))}</th>
+                  <th>${esc(L('Honors & Active Rankings', '荣誉分布与持榜明细', lang))}</th>
+                  <th class="num-col">${esc(t('playersBestScore', {}, lang))}</th>
+                  <th class="num-col" style="width:128px">${esc(t('playersHoldings', {}, lang))}</th>
                 </tr>
               </thead>
               <tbody>
                 ${rows.map((p, idx) => `
                   <tr>
-                    <td class="cell-rank">${renderRankBadge(idx + 1)}</td>
+                    <td class="cell-rank">${renderRankBadge(idx + 1, lang)}</td>
                     <td class="cell-entity">
-                      <button type="button" class="entity-jump-btn" data-jump-mane-player="${esc(p.name)}" data-jump-section="${esc(p.entries[0]?.section || 'new')}" data-jump-map="${esc(p.entries[0]?.mapId || '')}" data-jump-div="${esc(p.entries[0]?.division || 'zero')}" title="点击跳转并筛选调查员：${esc(p.name)}">
-                        <strong class="player-name">${esc(p.name)}</strong>
-                        <span class="entity-jump-arrow" aria-hidden="true">↗</span>
-                      </button>
+                      <div style="display:flex;flex-direction:column;gap:4px">
+                        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                          <span class="player-name is-clickable is-player-name" data-open-player="${esc(p.name)}" role="button" tabindex="0">${esc(p.name)}</span>
+                          <button type="button" class="text-link-btn" data-jump-mane-player="${esc(p.name)}" data-jump-section="${esc(p.entries[0]?.section || 'new')}" data-jump-map="${esc(p.entries[0]?.mapId || '')}" data-jump-div="${esc(p.entries[0]?.division || 'zero')}">${esc(t('totalsWatchMap', {}, lang))}</button>
+                        </div>
+                        ${p.favChars.length ? `
+                          <div class="hof-fav-chars">
+                            ${p.favChars.map(({ char }) => {
+                              const cDisp = displayCharacterName(char.name, lang);
+                              return char.portrait
+                                ? `<img src="${esc(char.portrait)}" alt="${esc(cDisp)}" title="${esc(cDisp)}" data-open-char="${esc(char.name)}" role="button" tabindex="0" style="cursor:pointer" loading="eager" decoding="async" />`
+                                : '';
+                            }).join('')}
+                          </div>` : ''}
+                      </div>
                     </td>
                     <td class="cell-detail">
-                      <div class="honor-badges-row">
-                        ${p.firstCount ? `<span class="honor-chip gold">榜首 ×${p.firstCount}</span>` : ''}
-                        ${p.podiumCount ? `<span class="honor-chip bronze">前三 ×${p.podiumCount}</span>` : ''}
+                      <div class="honor-badges-row hof-medals">
+                        ${p.firstCount ? `<span class="hof-crown-pill">♛ ${esc(t('hofCrownsLabel', {}, lang))} ×${p.firstCount}</span>` : ''}
+                        ${p.podiumCount ? `<span class="honor-chip bronze">${esc(t('hofPodiumsLabel', {}, lang))} ×${p.podiumCount}</span>` : ''}
                       </div>
                       <details class="map-breakdown">
-                        <summary>展开全部 ${p.recordCount} 条持榜纪录</summary>
+                        <summary>${esc(t('playersExpandRecords', { n: p.recordCount }, lang))}</summary>
                         <ul>
                           ${p.entries.map((e) => `
                             <li>
-                              <strong>#${e.rank} ${esc(e.mapName)}</strong>（${DIVISIONS[e.division]}）·
-                              <span style="display:inline;color:var(--copper-bright)">${formatScore(e.score)}</span>
-                              <button type="button" class="text-link-btn" style="margin-left:8px" data-jump-mane-record="${esc(e.id)}" data-jump-section="${esc(e.section)}" data-jump-map="${esc(e.mapId)}" data-jump-div="${esc(e.division)}">直达 ↗</button>
-                              <span>主 C：${esc(e.carry)}</span>
+                              <strong>#${e.rank} ${esc(e.mapName)}</strong> (${esc(localizeDivisionShort(e.division, lang))}) ·
+                              <span style="display:inline;color:var(--copper-bright)">${formatScore(e.score, lang)}</span>
+                              <button type="button" class="text-link-btn" style="margin-left:8px" data-jump-mane-record="${esc(e.id)}" data-jump-section="${esc(e.section)}" data-jump-map="${esc(e.mapId)}" data-jump-div="${esc(e.division)}">${esc(t('totalsWatchMap', {}, lang))}</button>
+                              <span>${esc(t('mainDpsLabel', {}, lang))}: ${esc(e.carry)}</span>
                             </li>`).join('')}
                         </ul>
                       </details>
                     </td>
-                    <td class="num-col cell-secondary" data-label="最高单图积分">
+                    <td class="num-col cell-secondary" data-label="${esc(t('playersBestScore', {}, lang))}">
                       <div class="cell-metric-val">
-                        <span class="score-value" style="font-size:15.5px">${formatScore(p.bestScore)}</span>
+                        <span class="score-value" style="font-size:15.5px">${formatScore(p.bestScore, lang)}</span>
                         <div class="cell-metric-sub">${esc(p.bestLabel)}</div>
                       </div>
                     </td>
-                    <td class="num-col cell-primary" data-label="当前持榜"><span class="score-value">${p.recordCount}</span> <span style="color:var(--ink-muted)">条</span></td>
+                    <td class="num-col cell-primary" data-label="${esc(t('playersHoldings', {}, lang))}"><span class="score-value">${p.recordCount}</span></td>
                   </tr>`).join('')}
               </tbody>
             </table>
           </div>`
-        : '<div class="empty-state"><span class="empty-glyph">♙</span><h3>当前范围内尚无上榜调查员</h3></div>'
+        : `<div class="empty-state"><span class="empty-glyph">♙</span><h3>${esc(t('playersEmpty', {}, lang))}</h3></div>`
       }
       <div class="board-foot">
-        <span>数据实时汇总自当前全部已审核通过的鬃毛邮报持榜纪录（与焦点闪回不同，鬃毛原库未单独记录历史曾持榜次数，此处统计当前在榜荣誉）</span>
+        <span>${esc(t('playersManeFoot', {}, lang))}</span>
       </div>
     </div>`;
 }
 
 function renderManeRules() {
-  const items = [
-    ['01', '两大分区', '「鉴藏者特版」收录当期版本开放的 3 位首领；「怪相档案」收录往期目击者特版复刻首领。'],
-    ['02', '全 0 / 全满塑造分榜', '全 0 塑造与全满塑造独立计分与排名，队伍内所有实际出战角色均需符合所选塑造分组要求。'],
-    ['03', '主 C 与完整阵容', '填写 1–4 名不重复的上阵角色；支持共同主 C（用 / 分隔），且所有主 C 必须包含在所填上阵配队内。'],
-    ['04', '同队取最高分', '同一地图、同一塑造组、同一完整角色组合仅保留最高调查积分；同分时按服务器提交时间先者居前。'],
-    ['05', '截图核验与隐私', '须上传清晰结算截图（PNG/JPG/WebP，≤ 5 MB），截图仅本人与审核管理员通过临时签名查看，不对外公开。'],
-    ['06', '主 C 总分统计', '主 C 总分榜按分区与塑造分组，汇总该角色在所有地图中的个人最高单图纪录之和，便于横向评估版本表现。']
-  ];
+  const lang = getLang();
+  const items = t('rulesManeItems', {}, lang) || [];
   return `
+    ${renderGlobalServerNoticeHtml('mane-rules', lang)}
     <div class="rules-grid">
       ${items.map(([num, title, desc]) => `
         <article class="rule-card">
-          <span class="rule-num">${num}</span>
-          <h3>${title}</h3>
-          <p>${desc}</p>
+          <span class="rule-num">${esc(num)}</span>
+          <h3>${esc(title)}</h3>
+          <p>${esc(desc)}</p>
         </article>`).join('')}
     </div>`;
 }
 
-/* ==================== 焦点闪回页面渲染 ==================== */
+/* ==================== Focused Flashback Pages ==================== */
+function parseFlashbackEnemyHpChips(stageArt, stageMech, lang = getLang()) {
+  const enemies = stageArt?.enemies || [];
+  if (!enemies.length) return [];
+  const rawDesc = String(stageMech?.enemies || '');
+  const segments = rawDesc.split('+').map((s) => s.trim()).filter(Boolean);
+  return enemies.map((enemy, idx) => {
+    const seg = segments[idx] || '';
+    const hpMatch = seg.match(/[（(]([^）)]+)[）)]/);
+    const countMatch = seg.match(/×\s*(\d+)/);
+    const hpText = hpMatch ? `${hpMatch[1]}${countMatch ? ` ×${countMatch[1]}` : ''}` : '';
+    return {
+      name: isEn(lang) ? enemy.en : enemy.name,
+      icon: enemy.icon,
+      hp: hpText
+    };
+  });
+}
+
 function renderFlashbackWorkspace() {
+  const lang = getLang();
   if (state.fbPage === 'rules') return renderFlashbackRules();
   if (state.fbPage === 'carries') return renderFlashbackCarries();
   if (state.fbPage === 'players') return renderFlashbackPlayers();
@@ -2632,12 +4434,22 @@ function renderFlashbackWorkspace() {
   const stages = standardStages(state.fbVersionId);
   if (state.fbVersions.length && !stages.some((s) => s.id === state.fbStageId)) state.fbStageId = stages[0]?.id || '';
   const stage = stages.find((s) => s.id === state.fbStageId);
-  const stageMech = resolveFlashbackStageMechanics(stage);
+  const stageMech = resolveFlashbackStageMechanics(stage, lang);
+  const stageArt = resolveFlashbackStageArt(stage);
+  const stageCleanTitle = stage ? cleanStageDisplayName(stage.name, lang) : t('fbTitle', {}, lang);
+  const archetypes = stageCleanTitle.split(/\s*[\/／]\s*/).map((s) => s.trim()).filter(Boolean);
+  const enemyChips = parseFlashbackEnemyHpChips(stageArt, stageMech, lang);
+  const stageWikiUrl = isEn(lang) ? stageArt?.wikiEn : stageArt?.wikiZh;
 
   const stageCounts = new Map();
+  const stageBestRounds = new Map();
   for (const r of state.fbRecords) {
     if (r.group_code === state.fbGroup) {
       stageCounts.set(r.stage_id, (stageCounts.get(r.stage_id) || 0) + 1);
+      const curBest = stageBestRounds.get(r.stage_id);
+      if (curBest === undefined || Number(r.rounds) < curBest) {
+        stageBestRounds.set(r.stage_id, Number(r.rounds));
+      }
     }
   }
 
@@ -2647,8 +4459,9 @@ function renderFlashbackWorkspace() {
   const ranked = state.fbRecords
     .filter((r) => r.stage_id === state.fbStageId && r.group_code === state.fbGroup)
     .sort(compareFlashbackRecord);
+  const stageFastest = ranked[0] || null;
 
-  const charEntries = collectBoardCharacters(ranked, state.fbRoleMode, (r) => r.carry_name);
+  const charEntries = collectBoardCharacters(ranked, state.fbRoleMode, (r) => r.carry_name, lang);
   const charLabelByKey = new Map(charEntries.map(([k, info]) => [k, info.label]));
   if (state.fbCarry && !charLabelByKey.has(state.fbCarry)) state.fbCarry = '';
 
@@ -2684,11 +4497,12 @@ function renderFlashbackWorkspace() {
 
   const rowsHtml = filteredRows.map(({ record, rank }) => {
     const pid = `fb-${record.id}`;
-    const canonicalCarryText = formatCanonicalCarry(record.carry_name);
-    const canonicalTeam = isLegacyShorthandTeam(record.team)
+    const carryDisplay = displayCarryNames(record.carry_name, lang);
+    const teamDisplay = isLegacyShorthandTeam(record.team)
       ? record.team
-      : (record.team || []).map(canonicalDisplayName);
+      : (record.team || []).map((n) => displayCharacterName(n, lang));
     const { psychubes, resonanceCodes } = extractRecordBuilds(record);
+
     posterIndex.set(pid, {
       mode: 'flashback',
       recordId: record.id,
@@ -2696,124 +4510,148 @@ function renderFlashbackWorkspace() {
       stageId: stage?.id || state.fbStageId,
       group: state.fbGroup,
       rank,
-      title: cleanStageDisplayName(stage?.name || '焦点闪回'),
-      subtitle: `${ver?.label || ''} · ${DIVISIONS[state.fbGroup]}`,
+      title: stageCleanTitle,
+      bossEn: stageMech?.code || '',
+      bossThumb: stageArt?.hero || '',
+      subtitle: `${ver ? localizeVersionLabel(ver, lang) : ''} · ${localizeDivision(state.fbGroup, lang)}`,
       player: record.display_name,
-      carry: canonicalCarryText,
+      carry: carryDisplay,
+      rawCarry: record.carry_name,
       team: record.team,
-      canonicalTeam,
+      displayTeam: teamDisplay,
       psychubes,
       resonanceCodes,
       resonanceTen: Boolean(record.group_code === 'zero' && record.resonance_ten),
       rounds: record.rounds,
-      date: formatDateTime(record.created_at),
+      date: formatDateTime(record.created_at, lang),
       related_url: record.related_url
     });
+
     const tierClass = rank <= 3 ? `top-${rank} is-podium` : 'is-regular';
     const highlightClass = state.highlightRecordId === pid ? 'is-highlighted' : '';
-    const hasBuilds = psychubes.some(Boolean) || resonanceCodes.some(Boolean);
-    const carryTitleAttr = record.carry_name.trim() !== canonicalCarryText ? ` title="原填：${esc(record.carry_name)}"` : '';
+    const localTag = localRecordBadgeHtml(record, lang);
+    const isFast = Number(record.rounds) <= 2;
+
     return `
       <article class="rank-row ${tierClass} ${highlightClass}" data-record-row="${esc(pid)}">
-        <div>${renderRankBadge(rank)}</div>
+        <div>${renderRankBadge(rank, lang)}</div>
         <div class="player-cell">
-          <span class="player-name">${esc(record.display_name)}</span>
+          <span class="player-name is-clickable is-player-name" data-open-player="${esc(record.display_name)}" role="button" tabindex="0">${esc(record.display_name)}</span>
           <div class="player-meta">
-            <span title="${esc(formatDateTime(record.created_at))}">${formatMonthDayTime(record.created_at)}</span>
-            ${safeLinkHtml(record.related_url, '视频/攻略 ↗')}
-            ${record.group_code === 'zero' && record.resonance_ten ? resonanceBadge : ''}
-            ${hasBuilds ? '<span class="row-build-tag">心相·共鸣</span>' : ''}
+            <span title="${esc(formatDateTime(record.created_at, lang))}">${esc(formatMonthDayTime(record.created_at, lang))}</span>
+            ${safeLinkHtml(record.related_url, t('videoGuideLink', {}, lang))}
+            ${record.group_code === 'zero' && record.resonance_ten ? resonanceBadgeHtml(lang) : ''}
+            ${localTag}
           </div>
         </div>
         <div class="lineup-cell">
-          <div class="carry-line"${carryTitleAttr}>
-            <span>主 C · ${esc(canonicalCarryText)}</span>
+          <div class="carry-line">
+            <span class="carry-label">${esc(t('mainDpsLabel', {}, lang))}</span>
+            <span>${esc(carryDisplay)}</span>
           </div>
-          ${renderFormationHtml(record.team, record.carry_name)}
+          ${renderFormationHtml(record.team, record.carry_name, psychubes, lang)}
         </div>
+        ${renderRowIntelColumnHtml({
+          mode: 'flashback',
+          record,
+          rank,
+          pid,
+          psychubes,
+          resonanceCodes,
+          boardPeak: null,
+          mapName: '',
+          stageFastest,
+          lang
+        })}
         <div class="result-cell">
-          <span class="round-badge">${record.rounds}<small>回合</small></span>
+          <span class="round-badge ${isFast ? 'is-fast' : ''}">${record.rounds}<small>${esc(isEn(lang) ? (Number(record.rounds) === 1 ? 'Round' : 'Rounds') : '回合')}</small></span>
           <div class="row-actions">
-            <button class="card-trigger" data-poster="${esc(pid)}">查看</button>
+            <button type="button" class="card-trigger" data-poster="${esc(pid)}">${esc(t('viewCardBtn', {}, lang))}</button>
           </div>
         </div>
       </article>`;
   }).join('');
 
   const archiveHtml = archives.length ? `
-    <div class="board-foot"><span>历史档案 · ${DIVISIONS[state.fbGroup]} · 6 回合内满星（沿用原表简称与行序）</span></div>
+    <div class="board-foot"><span>${esc(t('adminTabHistorical', {}, lang))} · ${esc(localizeDivision(state.fbGroup, lang))}</span></div>
     <div class="table-scroll">
       <table class="archive-table table-fb-archives">
-        <thead><tr><th>主 C</th><th>原表配队</th><th>攻略者</th><th class="num-col">成绩</th></tr></thead>
+        <thead><tr><th>${esc(t('mainDpsLabel', {}, lang))}</th><th>${esc(t('legacyTeamLabel', {}, lang))}</th><th>${esc(t('colInvestigator', {}, lang))}</th><th class="num-col">${esc(t('colRounds', {}, lang))}</th></tr></thead>
         <tbody>
           ${archives.map((row) => `
             <tr>
-              <td class="cell-entity" data-label="主 C">${(row.carry_names || []).map((c) => esc(canonicalDisplayName(c))).join('／')}</td>
-              <td class="cell-detail" data-label="原表配队">${esc(row.lineup_label)}</td>
-              <td class="cell-secondary" data-label="攻略者">${esc(row.credited_player)}</td>
-              <td class="num-col cell-primary" data-label="成绩">≤ 6 回合</td>
+              <td class="cell-entity" data-label="${esc(t('mainDpsLabel', {}, lang))}">${(row.carry_names || []).map((c) => esc(displayCharacterName(c, lang))).join(' / ')}</td>
+              <td class="cell-detail" data-label="${esc(t('legacyTeamLabel', {}, lang))}">${esc(row.lineup_label)}</td>
+              <td class="cell-secondary is-player-name" data-label="${esc(t('colInvestigator', {}, lang))}">${esc(row.credited_player)}</td>
+              <td class="num-col cell-primary" data-label="${esc(t('colRounds', {}, lang))}">≤ 6R</td>
             </tr>`).join('')}
         </tbody>
       </table>
     </div>` : '';
 
   const boardCountText = hasFilter
-    ? `符合条件 ${filteredRows.length} 条 / 共 ${ranked.length} 条`
-    : `${DIVISIONS[state.fbGroup]} · 共 ${ranked.length} 条`;
+    ? `${filteredRows.length} / ${ranked.length}`
+    : `${localizeDivisionShort(state.fbGroup, lang)} · ${formatEntries(ranked.length, lang)}`;
 
+  const stageAllGroupRecords = state.fbRecords.filter((r) => r.stage_id === state.fbStageId);
   const canResetFilter = Boolean(hasFilter || state.fbRoleMode !== 'carry');
   const activeFilterCount = [state.fbCarry, state.fbAfflatus, q, state.fbRoleMode === 'member', resonanceOnly].filter(Boolean).length;
 
   return `
     <div class="section-bar fb-section-bar">
       <div class="fb-version-picker">
-        <label for="fbVersionSelect" class="fb-version-label">收录期次</label>
+        <label for="fbVersionSelect" class="fb-version-label">${esc(t('versionSelectLabel', {}, lang))}</label>
         <select id="fbVersionSelect" class="filter-select fb-version-select">
-          ${optionsHtml(state.fbVersions.map((v) => [v.id, v.label]), state.fbVersionId)}
+          ${optionsHtml(state.fbVersions.map((v) => [v.id, localizeVersionLabel(v, lang)]), state.fbVersionId)}
         </select>
       </div>
-      <button class="ghost-btn icon-btn section-refresh-btn" data-action="refresh" title="刷新榜单" aria-label="刷新榜单"><img class="uttu-micro-icon" src="./assets/uttu/btn_reset.webp" alt="" aria-hidden="true" /><span class="btn-label">刷新榜单</span></button>
+      <button type="button" class="ghost-btn icon-btn section-refresh-btn" data-action="refresh" title="${esc(t('btnRefresh', {}, lang))}" aria-label="${esc(t('btnRefresh', {}, lang))}"><img class="uttu-micro-icon" src="./assets/uttu/btn_reset.webp" alt="" aria-hidden="true" /><span class="btn-label">${esc(t('btnRefresh', {}, lang))}</span></button>
     </div>
 
+    ${renderGlobalServerNoticeHtml('fb-board', lang)}
+
     <div class="board-grid">
-      <aside class="sidebar-panel ${state.mobileFilterOpen ? 'is-filter-open' : ''}" aria-label="焦点闪回筛选栏">
+      <aside class="sidebar-panel ${state.mobileFilterOpen ? 'is-filter-open' : ''}" aria-label="${esc(t('headingLineupFilter', {}, lang))}">
         <div class="sidebar-dossier-block">
-          ${igHeading('挑战关卡', 'STAGE SELECT', `${DIVISIONS[state.fbGroup]}计数`)}
+          ${igHeading(t('headingStageSelect', {}, lang), t('headingStageSelectEn', {}, lang), localizeDivisionShort(state.fbGroup, lang))}
           <div class="dossier-list">
             ${stages.map((s) => {
               const cnt = stageCounts.get(s.id) || 0;
-              const sMech = resolveFlashbackStageMechanics(s);
-              const cleanName = cleanStageDisplayName(s.name);
-              const enemyBrief = sMech?.enemies
-                ? sMech.enemies.replace(/（[^）]*）/g, '').replace(/\s*×\s*\d+/g, '').replace(/\s*\+\s*/g, ' · ')
-                : `关卡 ${s.stage_no}`;
+              const bestR = stageBestRounds.get(s.id);
+              const sArt = resolveFlashbackStageArt(s);
+              const cleanName = cleanStageDisplayName(s.name, lang);
+              const enemyBrief = (sArt?.enemies || []).map((e) => (isEn(lang) ? e.en : e.name)).join(' · ') || `Stage ${s.stage_no}`;
               return `
-                <button class="dossier-item ${s.id === state.fbStageId ? 'active' : ''}" data-fb-stage="${esc(s.id)}" title="${esc(cleanName)}（${DIVISIONS[state.fbGroup]}共 ${cnt} 条纪录）">
-                  <span class="survey-num-box" aria-hidden="true">${s.stage_no}</span>
+                <button type="button" class="dossier-item ${s.id === state.fbStageId ? 'active' : ''} ${sArt?.thumb ? 'has-boss-bg' : ''}" data-fb-stage="${esc(s.id)}" title="${esc(cleanName)} (${esc(formatEntries(cnt, lang))})">
+                  ${sArt?.thumb ? `<span class="dossier-boss-art" style="background-image:url('${esc(sArt.thumb)}');background-position:${esc(sArt.pos)}" aria-hidden="true"></span>` : ''}
+                  <span class="survey-num-box" aria-hidden="true">${toRoman(s.stage_no)}</span>
                   <span class="dossier-main">
                     <span class="dossier-name">${esc(cleanName)}</span>
                     <span class="dossier-sub">${esc(enemyBrief)}</span>
                   </span>
-                  <span class="dossier-badge">${cnt} 条</span>
+                  <span class="dossier-right-col">
+                    ${bestR !== undefined ? `<span class="dossier-peak-preview">${esc(t('roundsUnit', { n: bestR }, lang))}</span>` : ''}
+                    <span class="dossier-badge">${esc(formatEntries(cnt, lang))}</span>
+                  </span>
                 </button>`;
-            }).join('') || '<p class="sidebar-note">暂无关卡数据</p>'}
+            }).join('') || `<p class="sidebar-note">${esc(t('emptyTitleEmpty', {}, lang))}</p>`}
           </div>
         </div>
 
         <div class="sidebar-portrayal-block">
-          ${igHeading('塑造限制', 'PORTRAYAL')}
+          ${igHeading(t('headingPortrayal', {}, lang), t('headingPortrayalEn', {}, lang))}
           <div class="portrayal-control-row">
             <div class="segmented-toggle">
-              <button class="seg-btn ${state.fbGroup === 'zero' ? 'active' : ''}" data-fb-group="zero">
-                <span>全 0 塑造</span><small>${zeroCount} 条纪录</small>
+              <button type="button" class="seg-btn ${state.fbGroup === 'zero' ? 'active' : ''}" data-fb-group="zero">
+                <span>${esc(localizeDivision('zero', lang))}</span><small>${esc(formatEntries(zeroCount, lang))}</small>
               </button>
-              <button class="seg-btn ${state.fbGroup === 'max' ? 'active' : ''}" data-fb-group="max">
-                <span>全满塑造</span><small>${maxCount} 条纪录</small>
+              <button type="button" class="seg-btn ${state.fbGroup === 'max' ? 'active' : ''}" data-fb-group="max">
+                <span>${esc(localizeDivision('max', lang))}</span><small>${esc(formatEntries(maxCount, lang))}</small>
               </button>
             </div>
             <button type="button" class="mobile-filter-toggle ${state.mobileFilterOpen ? 'open' : ''} ${activeFilterCount ? 'has-active' : ''}" data-action="toggle-mobile-filter" aria-expanded="${state.mobileFilterOpen}">
               <img class="uttu-micro-icon" src="./assets/uttu/btn_search.webp" alt="" aria-hidden="true" />
-              <span>筛选${activeFilterCount ? ` (${activeFilterCount})` : ''}</span>
+              <span>${esc(t('mobileFilterBtn', {}, lang))}${activeFilterCount ? ` (${activeFilterCount})` : ''}</span>
               <span class="filter-caret" aria-hidden="true">${state.mobileFilterOpen ? '▴' : '▾'}</span>
             </button>
           </div>
@@ -2823,96 +4661,133 @@ function renderFlashbackWorkspace() {
           <div class="ig-heading">
             <span class="ig-heading-left">
               <span class="ig-tri" aria-hidden="true">▶</span>
-              <span class="ig-cn">阵容筛选</span>
+              <span class="ig-cn">${esc(t('headingLineupFilter', {}, lang))}</span>
               <span class="ig-bar" aria-hidden="true"></span>
-              <span class="ig-en">LINEUP FILTER</span>
+              <span class="ig-en">${esc(t('headingLineupFilterEn', {}, lang))}</span>
             </span>
-            <button type="button" class="filter-reset-btn" data-action="reset-fb-filter" ${canResetFilter ? '' : 'disabled'} title="清空所有阵容筛选条件">
+            <button type="button" class="filter-reset-btn" data-action="reset-fb-filter" ${canResetFilter ? '' : 'disabled'} title="${esc(t('clearFilter', {}, lang))}">
               <img src="./assets/uttu/btn_reset.webp" alt="" aria-hidden="true" />
-              <span>重置</span>
+              <span>${esc(t('resetFilter', {}, lang))}</span>
             </button>
           </div>
 
-          <div class="role-mode-toggle" role="group" aria-label="角色筛选口径">
-            <button type="button" class="role-pill ${state.fbRoleMode === 'carry' ? 'active' : ''}" data-fb-role="carry">仅看主 C</button>
-            <button type="button" class="role-pill ${state.fbRoleMode === 'member' ? 'active' : ''}" data-fb-role="member">阵容含该角色</button>
+          <div class="role-mode-toggle" role="group" aria-label="${esc(t('headingLineupFilter', {}, lang))}">
+            <button type="button" class="role-pill ${state.fbRoleMode === 'carry' ? 'active' : ''}" data-fb-role="carry">${esc(t('roleCarryOnly', {}, lang))}</button>
+            <button type="button" class="role-pill ${state.fbRoleMode === 'member' ? 'active' : ''}" data-fb-role="member">${esc(t('roleAnyMember', {}, lang))}</button>
           </div>
 
           <div class="field" style="margin-bottom:8px">
-            <select id="fbCarrySelect" class="filter-select" aria-label="${state.fbRoleMode === 'carry' ? '按主 C 角色筛选' : '按上阵角色筛选'}">
-              <option value="">${state.fbRoleMode === 'carry' ? `全部主 C（${charEntries.length}）` : `全部上阵角色（${charEntries.length}）`}</option>
-              ${optionsHtml(charEntries.map(([k, info]) => [k, `${info.label}（${info.count}）`]), state.fbCarry)}
+            <select id="fbCarrySelect" class="filter-select" aria-label="${esc(state.fbRoleMode === 'carry' ? t('allCarriesOption', {}, lang) : t('allMembersOption', {}, lang))}">
+              <option value="">${esc(state.fbRoleMode === 'carry' ? `${t('allCarriesOption', {}, lang)} (${charEntries.length})` : `${t('allMembersOption', {}, lang)} (${charEntries.length})`)}</option>
+              ${optionsHtml(charEntries.map(([k, info]) => [k, `${info.label} (${info.count})`]), state.fbCarry)}
             </select>
           </div>
 
-          ${renderAfflatusFilterHtml(state.fbAfflatus, 'data-fb-aff')}
+          ${renderAfflatusFilterHtml(state.fbAfflatus, 'data-fb-aff', lang)}
 
           <div class="search-input-wrap">
             <img class="search-input-icon" src="./assets/uttu/btn_search.webp" alt="" aria-hidden="true" />
-            <input id="fbSearchInput" class="filter-input has-icon" type="search" placeholder="搜索玩家名、角色名或简称…" value="${esc(state.fbQuery)}" aria-label="搜索玩家或角色" />
+            <input id="fbSearchInput" class="filter-input has-icon" type="search" placeholder="${esc(t('searchPlaceholderFb', {}, lang))}" value="${esc(state.fbQuery)}" aria-label="${esc(t('searchPlaceholderFb', {}, lang))}" />
           </div>
         </div>
 
+        ${renderSidebarMetaWidget(ranked, (r) => r.carry_name, state.fbCarry, 'flashback', lang)}
+
         <div class="sidebar-note">
-          同一关卡、塑造组与完整阵容（不计角色顺序）仅保留回合最少的一条纪录；同回合先提交者胜出。
+          ${esc(t('sidebarNoteFb', {}, lang))}
         </div>
       </aside>
 
       <div>
         <section class="board-panel">
-          <div class="board-header">
+          <div class="board-header ${stageArt?.hero ? 'has-fb-art' : ''}">
+            <span class="boss-stamp-edge" aria-hidden="true"></span>
+            ${stageArt?.hero ? `<div class="boss-header-backdrop" style="background-image:url('${esc(stageArt.hero)}');background-position:${esc(stageArt.pos)}" aria-hidden="true"></div>` : ''}
+            <div class="boss-header-scrim" aria-hidden="true"></div>
             <div class="board-title-stack">
               <div class="boss-headline-wrap">
-                <h2>${esc(cleanStageDisplayName(stage?.name || '焦点闪回榜'))}</h2>
-                <span class="boss-en-sub">Flashback Challenge</span>
+                <h2>${esc(stageCleanTitle)}</h2>
+                <span class="boss-en-sub">${esc(stageMech?.code || `STAGE ${stage?.stage_no || ''}`)}</span>
               </div>
+              ${archetypes.length ? `
+                <div class="fb-archetype-row">
+                  ${archetypes.map((tag) => `<span class="fb-archetype-tag">✦ ${esc(tag)}</span>`).join('')}
+                </div>` : ''}
+              ${enemyChips.length ? `
+                <div class="fb-enemy-strip">
+                  ${enemyChips.map((enemy) => `
+                    <div class="fb-enemy-chip">
+                      <img class="fb-enemy-avatar" src="${esc(enemy.icon)}" alt="${esc(enemy.name)}" loading="eager" decoding="async" />
+                      <div class="fb-enemy-meta">
+                        <span class="fb-enemy-name">${esc(enemy.name)}</span>
+                        ${enemy.hp ? `<span class="fb-enemy-hp">${esc(enemy.hp)}</span>` : ''}
+                      </div>
+                    </div>`).join('')}
+                </div>` : ''}
               <div class="boss-quick-glance">
-                <span class="glance-tags">0–6 回合有效 / 同队取最短回合</span>
-                ${state.fbGroup === 'zero' ? `<button type="button" class="resonance-tag" data-action="fb-resonance" aria-pressed="${resonanceOnly}">✦ 只看全0塑 · 共鸣10</button>` : ''}
-                ${stageMech ? `<button type="button" class="mech-toggle-btn ${state.fbMechOpen ? 'active' : ''}" data-action="toggle-fb-mech" aria-expanded="${state.fbMechOpen}">${state.fbMechOpen ? '收起关卡机制 ▴' : '查看关卡机制 ▾'}</button>` : ''}
-                ${state.fbCarry ? `<span class="glance-active-chip">${state.fbRoleMode === 'carry' ? '主 C' : '含角色'}：${esc(charLabelByKey.get(state.fbCarry) || '')}</span>` : ''}
-                ${state.fbAfflatus ? `<span class="glance-active-chip">灵感：${esc(AFFLATUS_META[state.fbAfflatus]?.label || '')}</span>` : ''}
-                ${hasFilter ? '<button type="button" class="glance-clear-btn" data-action="reset-fb-filter">✕ 清空筛选</button>' : ''}
+                ${state.fbGroup === 'zero' ? `<button type="button" class="resonance-tag" data-action="fb-resonance" aria-pressed="${resonanceOnly}">✦ ${esc(t('res10Filter', {}, lang))}</button>` : ''}
+                ${stageMech ? `<button type="button" class="mech-toggle-btn ${state.fbMechOpen ? 'active' : ''}" data-action="toggle-fb-mech" aria-expanded="${state.fbMechOpen}">${esc(state.fbMechOpen ? t('btnCollapseStageMech', {}, lang) : t('btnExpandStageMech', {}, lang))}</button>` : ''}
+                ${stageWikiUrl ? `<a class="text-link-btn" href="${esc(stageWikiUrl)}" target="_blank" rel="noopener noreferrer">${esc(t('stageWikiLink', {}, lang))}</a>` : ''}
+                ${state.fbCarry ? `<span class="glance-active-chip">${esc(state.fbRoleMode === 'carry' ? t('mainDpsLabel', {}, lang) : t('roleAnyMember', {}, lang))}: ${esc(charLabelByKey.get(state.fbCarry) || '')}</span>` : ''}
+                ${state.fbAfflatus ? `<span class="glance-active-chip">${esc(localizeAfflatus(state.fbAfflatus, lang))}</span>` : ''}
+                ${hasFilter ? `<button type="button" class="glance-clear-btn" data-action="reset-fb-filter">✕ ${esc(t('clearFilter', {}, lang))}</button>` : ''}
               </div>
             </div>
-            <div class="board-header-right">
-              <span class="count-tag ${hasFilter ? 'is-filtered' : ''}">${esc(boardCountText)}</span>
+            <div class="boss-peak-widget">
+              <div class="boss-peak-eyebrow">
+                <span>${esc(t('metricFastest', {}, lang))}</span>
+                <span class="boss-peak-count">${esc(boardCountText)}</span>
+              </div>
+              ${stageFastest
+                ? `<div class="peak-score-ticket">
+                     <div class="peak-score-text">
+                       <span class="peak-label is-player-name">${esc(stageFastest.display_name)}</span>
+                       <span class="score-value">${esc(formatRounds(stageFastest.rounds, lang))}</span>
+                     </div>
+                   </div>`
+                : `<div class="peak-score-ticket"><div class="peak-score-text"><span class="peak-label">${esc(t('emptyTitleEmpty', {}, lang))}</span><span class="score-value">—</span></div></div>`
+              }
+              <div class="boss-peak-actions">
+                ${state.connected && stage ? `<button type="button" class="paper-btn boss-submit-btn" data-action="open-submit">${esc(t('submitThisStage', {}, lang))}</button>` : ''}
+              </div>
             </div>
           </div>
 
-          ${renderFlashbackStageMechanicsDrawer(stageMech)}
+          ${renderFlashbackStageMechanicsDrawer(stageMech, lang)}
+
+          ${renderBoardIntelBar('flashback', ranked, stageAllGroupRecords, lang)}
 
           ${filteredRows.length
             ? `<div class="rank-list">
                  <div class="rank-list-head">
-                   <span>排序</span><span>玩家 / 上传时间</span><span>主 C 与完整阵容</span><span class="col-right">通关回合</span>
+                   <span>${esc(t('colRank', {}, lang))}</span><span>${esc(t('colPlayerTime', {}, lang))}</span><span>${esc(t('colLineup', {}, lang))}</span><span>${esc(t('colArchetype', {}, lang))}</span><span class="col-right">${esc(t('colRounds', {}, lang))}</span>
                  </div>
                  ${rowsHtml}
                </div>`
             : (archives.length ? '' : `<div class="empty-state">
                  <span class="empty-glyph">✧</span>
-                 <h3>${state.loading ? '正在加载榜单…' : (hasFilter ? '无匹配的筛选结果' : '当前榜单为空')}</h3>
-                 <p>${hasFilter ? '可清空筛选条件查看当前关卡的全部成绩。' : '尚无审核通过的 0–6 回合成绩。'}</p>
-                 ${hasFilter ? '<button class="outline-btn" data-action="reset-fb-filter">重置筛选条件</button>' : (state.connected ? '<button class="copper-btn" data-action="open-submit">投稿首条纪录</button>' : '')}
+                 <h3>${esc(state.loading ? t('emptyTitleLoading', {}, lang) : (hasFilter ? t('emptyTitleFiltered', {}, lang) : t('emptyTitleEmpty', {}, lang)))}</h3>
+                 <p>${esc(hasFilter ? t('emptyDescFiltered', {}, lang) : t('emptyDescFb', {}, lang))}</p>
+                 ${hasFilter ? `<button type="button" class="outline-btn" data-action="reset-fb-filter">${esc(t('clearFilter', {}, lang))}</button>` : (state.connected ? `<button type="button" class="copper-btn" data-action="open-submit">${esc(t('emptyActionSubmit', {}, lang))}</button>` : '')}
                </div>`)
           }
           ${archiveHtml}
           <div class="board-foot">
-            <span>以服务器上传时间为准 · 管理员核验通过后自动重算荣誉</span>
-            <button class="text-link-btn" data-action="refresh">刷新榜单 ↻</button>
+            <span>${esc(t('boardFootFb', {}, lang))}</span>
+            <button type="button" class="text-link-btn" data-action="refresh">${esc(t('btnRefresh', {}, lang))}</button>
           </div>
         </section>
 
         <div class="two-cards">
           <article class="rule-card">
             <span class="rule-num">01</span>
-            <h3>一队 · 一纪录</h3>
-            <p>相同关卡、塑造组和完整阵容，仅保留回合最少的一条记录。主 C 单独高亮，但不改变队伍归属。</p>
+            <h3>${esc(t('fbRuleCard1Title', {}, lang))}</h3>
+            <p>${esc(t('fbRuleCard1Desc', {}, lang))}</p>
           </article>
           <article class="rule-card">
             <span class="rule-num">02</span>
-            <h3>上榜次数</h3>
-            <p>各期只统计仍列在该期榜单上的成绩。同一期内被超越后，原成绩从上榜次数中扣除。</p>
+            <h3>${esc(t('fbRuleCard2Title', {}, lang))}</h3>
+            <p>${esc(t('fbRuleCard2Desc', {}, lang))}</p>
           </article>
         </div>
       </div>
@@ -2920,8 +4795,16 @@ function renderFlashbackWorkspace() {
 }
 
 function renderFlashbackCarries() {
-  const scopes = { period: '本期', all: '历史总计' };
-  const metrics = { appearance_count: '上榜总次数', challenge_count: '通关关卡数' };
+  const lang = getLang();
+  const locale = isEn(lang) ? 'en' : 'zh-CN';
+  const scopes = {
+    period: t('carryScopePeriod', {}, lang),
+    all: t('carryScopeAll', {}, lang)
+  };
+  const metrics = {
+    appearance_count: t('carryMetricAppearances', {}, lang),
+    challenge_count: L('Stages Cleared', '通关关卡数', lang)
+  };
   const versionId = state.fbCarryScope === 'period' ? state.fbVersionId : null;
   const ver = state.fbVersions.find((v) => v.id === versionId);
   const primary = state.fbCarryMetric;
@@ -2943,22 +4826,22 @@ function renderFlashbackCarries() {
     }
   }
 
-  // 按统一角色 ID 合并焦点闪回主 C 异体/简称写法
   const merged = new Map();
   for (const row of state.fbCarries) {
     if (row.version_id !== versionId) continue;
     const key = canonicalCharacterKey(row.carry_name);
-    const displayName = canonicalDisplayName(row.carry_name);
+    const displayName = displayCharacterName(row.carry_name, lang);
+    const canonCn = canonicalDisplayName(row.carry_name);
     const prev = merged.get(key);
     if (!prev) {
       merged.set(key, {
+        carry_key: key,
         carry_name: displayName,
-        rawNames: new Set([row.carry_name]),
+        carry_cn: canonCn,
         appearance_count: winningLineups.get(key)?.size || 0,
         challenge_count: Number(row.challenge_count || 0)
       });
     } else {
-      prev.rawNames.add(row.carry_name);
       prev.challenge_count = Math.min(maxChallenges || 999, Math.max(prev.challenge_count, Number(row.challenge_count || 0)));
     }
   }
@@ -2968,19 +4851,19 @@ function renderFlashbackCarries() {
     .sort((a, b) =>
       (b[primary] - a[primary]) ||
       (b[secondary] - a[secondary]) ||
-      String(a.carry_name).localeCompare(String(b.carry_name), 'zh-CN')
+      String(a.carry_name).localeCompare(String(b.carry_name), locale)
     );
 
   return `
     <div class="section-bar">
       <div class="section-tabs">
         ${Object.entries(scopes).map(([k, lbl]) =>
-          `<button class="section-tab-btn ${k === state.fbCarryScope ? 'active' : ''}" data-fb-carry-scope="${k}">${lbl}</button>`
+          `<button type="button" class="section-tab-btn ${k === state.fbCarryScope ? 'active' : ''}" data-fb-carry-scope="${k}">${esc(lbl)}</button>`
         ).join('')}
       </div>
       <div class="section-tabs">
         ${Object.entries(metrics).map(([k, lbl]) =>
-          `<button class="outline-btn ${k === primary ? 'selected' : ''}" data-fb-carry-metric="${k}">${lbl}</button>`
+          `<button type="button" class="outline-btn ${k === primary ? 'selected' : ''}" data-fb-carry-metric="${k}">${esc(lbl)}</button>`
         ).join('')}
       </div>
     </div>
@@ -2988,33 +4871,35 @@ function renderFlashbackCarries() {
     <div class="board-panel">
       <div class="board-header">
         <div class="board-title-stack">
-          <div class="board-survey-tag"><span>CARRY RANKING · 主 C 登场统计</span></div>
+          <div class="board-survey-tag"><span>${esc(L('CARRY RANKING · MAIN DPS METRICS', 'CARRY RANKING · 主 C 登场统计', lang))}</span></div>
           <div class="boss-headline-wrap">
-            <h2>主 C 排行榜</h2>
+            <h2>${esc(t('carriesPageTitle', {}, lang))}</h2>
             <span class="boss-en-sub">Top Arcanist Carries</span>
           </div>
           <div class="paper-tag-row">
-            <span class="paper-tag dark">${state.fbCarryScope === 'all' ? '所有版本汇总 · 重复关卡合并去重' : esc(ver?.label || '本期统计')}</span>
+            <span class="paper-tag dark">${esc(state.fbCarryScope === 'all' ? t('carryScopeAll', {}, lang) : (ver ? localizeVersionLabel(ver, lang) : t('carryScopePeriod', {}, lang)))}</span>
           </div>
         </div>
-        <span class="count-tag">${rows.length} 位主 C</span>
+        <span class="count-tag">${esc(formatEntries(rows.length, lang))}</span>
       </div>
       ${rows.length
         ? `<div class="table-scroll">
             <table class="archive-table table-fb-carries">
-              <thead><tr><th style="width:76px">名次</th><th>主 C</th><th class="num-col">${metrics[primary]}</th><th class="num-col">${metrics[secondary]}</th></tr></thead>
+              <thead><tr><th style="width:76px">${esc(t('colRank', {}, lang))}</th><th>${esc(t('mainDpsLabel', {}, lang))}</th><th class="num-col">${esc(metrics[primary])}</th><th class="num-col">${esc(metrics[secondary])}</th></tr></thead>
               <tbody>
                 ${rows.map((row, idx) => `
                     <tr>
-                      <td class="cell-rank">${renderRankBadge(idx + 1)}</td>
+                      <td class="cell-rank">${renderRankBadge(idx + 1, lang)}</td>
                       <td class="cell-entity">
-                        <button type="button" class="entity-jump-btn" data-jump-fb-carry="${esc(canonicalCharacterKey(row.carry_name))}" data-jump-carry-name="${esc(row.carry_name)}" title="点击跳转并筛选主 C：${esc(row.carry_name)}">
-                          ${renderCarryAvatarHtml(row.carry_name)}
-                          <span style="min-width:0">
-                            <strong style="font-family:var(--font-serif);font-size:15px">${esc(row.carry_name)}</strong>
-                          </span>
-                          <span class="entity-jump-arrow" aria-hidden="true">↗</span>
-                        </button>
+                        <div style="display:flex;align-items:center;gap:6px">
+                          <span data-open-char="${esc(row.carry_cn)}" role="button" tabindex="0" style="cursor:pointer;display:inline-flex" title="${esc(row.carry_name)}">${renderCarryAvatarHtml(row.carry_cn, lang)}</span>
+                          <button type="button" class="entity-jump-btn" data-jump-fb-carry="${esc(row.carry_key)}" data-jump-carry-name="${esc(row.carry_name)}" title="${esc(row.carry_name)}">
+                            <span style="min-width:0">
+                              <strong style="font-family:var(--font-serif);font-size:15px">${esc(row.carry_name)}</strong>
+                            </span>
+                            <span class="entity-jump-arrow" aria-hidden="true">↗</span>
+                          </button>
+                        </div>
                       </td>
                       <td class="num-col cell-primary" data-label="${esc(metrics[primary])}"><span class="score-value">${row[primary]}</span></td>
                       <td class="num-col cell-secondary" data-label="${esc(metrics[secondary])}" style="color:var(--linen)">${row[secondary]}</td>
@@ -3022,105 +4907,160 @@ function renderFlashbackCarries() {
               </tbody>
             </table>
           </div>`
-        : '<div class="empty-state"><span class="empty-glyph">◇</span><h3>暂无可统计成绩</h3></div>'
+        : `<div class="empty-state"><span class="empty-glyph">◇</span><h3>${esc(t('emptyTitleEmpty', {}, lang))}</h3></div>`
       }
-      <div class="board-foot"><span>上榜次数仅统计各期榜单保留的成绩，按「关卡 × 塑造组 × 配队」去重。通关数按关卡去重。</span></div>
+      <div class="board-foot"><span>${esc(t('carriesPageSub', {}, lang))}</span></div>
     </div>`;
 }
 
 function renderFlashbackPlayers() {
+  const lang = getLang();
+  const locale = isEn(lang) ? 'en' : 'zh-CN';
   const version = state.fbVersions.find((v) => v.id === state.fbVersionId);
   const period = new Map(state.fbPlayers.filter((p) => p.version_id === state.fbVersionId)
     .map((p) => [p.player_id, p.appearance_count]));
+
+  // Aggregate Flashback crowns, podiums & favorite carries per player
+  const fbMetaByPlayer = new Map();
+  const fbBoards = new Map();
+  for (const rec of state.fbRecords) {
+    const gk = `${rec.stage_id}::${rec.group_code}`;
+    if (!fbBoards.has(gk)) fbBoards.set(gk, []);
+    fbBoards.get(gk).push(rec);
+  }
+  for (const list of fbBoards.values()) {
+    list.sort(compareFlashbackRecord);
+    list.forEach((rec, idx) => {
+      const k = normKey(rec.display_name);
+      if (!k) return;
+      let m = fbMetaByPlayer.get(k);
+      if (!m) {
+        m = { crowns: 0, podiums: 0, carries: new Map() };
+        fbMetaByPlayer.set(k, m);
+      }
+      if (idx === 0) m.crowns += 1;
+      if (idx < 3) m.podiums += 1;
+      for (const rawC of splitCarries(rec.carry_name)) {
+        const ch = resolveCharacter(rawC);
+        if (!ch) continue;
+        const cur = m.carries.get(ch.id);
+        if (cur) cur.count += 1;
+        else m.carries.set(ch.id, { char: ch, count: 1 });
+      }
+    });
+  }
+
   const rows = state.fbPlayers.filter((p) => p.version_id === null)
-    .map((p) => ({...p, periodCount: period.get(p.player_id) || 0}))
+    .map((p) => {
+      const m = fbMetaByPlayer.get(normKey(p.display_name));
+      return {
+        ...p,
+        periodCount: period.get(p.player_id) || 0,
+        crowns: m?.crowns || 0,
+        podiums: m?.podiums || 0,
+        favChars: m ? [...m.carries.values()].sort((a, b) => b.count - a.count).slice(0, 3) : []
+      };
+    })
     .sort((a, b) => (b.periodCount - a.periodCount) || (b.appearance_count - a.appearance_count) ||
-      String(a.display_name).localeCompare(String(b.display_name), 'zh-CN') ||
+      String(a.display_name).localeCompare(String(b.display_name), locale) ||
       String(a.player_id).localeCompare(String(b.player_id)));
+
   return `
     <div class="section-bar">
       <div class="fb-version-picker">
-        <label for="fbVersionSelect" class="fb-version-label">统计期次</label>
+        <label for="fbVersionSelect" class="fb-version-label">${esc(t('versionSelectLabel', {}, lang))}</label>
         <select id="fbVersionSelect" class="filter-select fb-version-select">
-          ${optionsHtml(state.fbVersions.map((v) => [v.id, v.label]), state.fbVersionId)}
+          ${optionsHtml(state.fbVersions.map((v) => [v.id, localizeVersionLabel(v, lang)]), state.fbVersionId)}
         </select>
       </div>
     </div>
     <div class="board-panel">
       <div class="board-header">
         <div class="board-title-stack">
-          <div class="board-survey-tag"><span>HALL OF FAME · 跨版本荣誉统计</span></div>
+          <div class="board-survey-tag"><span>HALL OF FAME</span></div>
           <div class="boss-headline-wrap">
-            <h2>玩家荣誉殿堂</h2>
+            <h2>${esc(t('playersFbTitle', {}, lang))}</h2>
             <span class="boss-en-sub">All-Time Honors</span>
           </div>
           <div class="paper-tag-row">
-            <span class="paper-tag dark">${esc(version?.label || '所选期次')} · 按该期持榜数降序 · 同分比较历期合计</span>
+            <span class="paper-tag dark">${esc(version ? localizeVersionLabel(version, lang) : t('fbCycleFallback', {}, lang))}</span>
           </div>
         </div>
-        <span class="count-tag">${rows.length} 位荣耀玩家</span>
+        <span class="count-tag">${esc(formatEntries(rows.length, lang))}</span>
       </div>
       ${rows.length
         ? `<div class="table-scroll">
             <table class="archive-table table-fb-players">
-              <thead><tr><th style="width:76px">名次</th><th>玩家昵称</th><th class="num-col">所选期持榜数</th><th class="num-col">历期持榜总数</th></tr></thead>
+              <thead><tr><th style="width:76px">${esc(t('colRank', {}, lang))}</th><th>${esc(L('Timekeeper', '玩家昵称', lang))}</th><th class="num-col">${esc(t('playersPeriodHoldings', {}, lang))}</th><th class="num-col">${esc(t('playersAllTimeHoldings', {}, lang))}</th></tr></thead>
               <tbody>
                 ${rows.map((p, idx) => `
                   <tr>
-                    <td class="cell-rank">${renderRankBadge(idx + 1)}</td>
+                    <td class="cell-rank">${renderRankBadge(idx + 1, lang)}</td>
                     <td class="cell-entity">
-                      <button type="button" class="entity-jump-btn" data-jump-fb-player="${esc(p.display_name)}" title="点击跳转并筛选玩家：${esc(p.display_name)}">
-                        <strong class="player-name">${esc(p.display_name)}</strong>
-                        <span class="entity-jump-arrow" aria-hidden="true">↗</span>
-                      </button>
+                      <div style="display:flex;flex-direction:column;gap:4px">
+                        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                          <span class="player-name is-clickable is-player-name" data-open-player="${esc(p.display_name)}" role="button" tabindex="0">${esc(p.display_name)}</span>
+                          <button type="button" class="text-link-btn" data-jump-fb-player="${esc(p.display_name)}">${esc(t('totalsWatchMap', {}, lang))}</button>
+                        </div>
+                        ${(p.crowns || p.podiums) ? `
+                          <div class="hof-medals">
+                            ${p.crowns ? `<span class="hof-crown-pill">♛ ${esc(t('hofCrownsLabel', {}, lang))} ×${p.crowns}</span>` : ''}
+                            ${p.podiums ? `<span class="honor-chip bronze">${esc(t('hofPodiumsLabel', {}, lang))} ×${p.podiums}</span>` : ''}
+                          </div>` : ''}
+                        ${p.favChars.length ? `
+                          <div class="hof-fav-chars">
+                            ${p.favChars.map(({ char }) => {
+                              const cDisp = displayCharacterName(char.name, lang);
+                              return char.portrait
+                                ? `<img src="${esc(char.portrait)}" alt="${esc(cDisp)}" title="${esc(cDisp)}" data-open-char="${esc(char.name)}" role="button" tabindex="0" style="cursor:pointer" loading="eager" decoding="async" />`
+                                : '';
+                            }).join('')}
+                          </div>` : ''}
+                      </div>
                     </td>
-                    <td class="num-col cell-primary" data-label="所选期持榜"><span class="score-value">${p.periodCount}</span> <span style="color:var(--ink-muted)">次</span></td>
-                    <td class="num-col cell-secondary" data-label="历期持榜" style="color:var(--linen)">${p.appearance_count} 次</td>
+                    <td class="num-col cell-primary" data-label="${esc(t('playersPeriodHoldings', {}, lang))}"><span class="score-value">${p.periodCount}</span></td>
+                    <td class="num-col cell-secondary" data-label="${esc(t('playersAllTimeHoldings', {}, lang))}" style="color:var(--linen)">${p.appearance_count}</td>
                   </tr>`).join('')}
               </tbody>
             </table>
           </div>`
-        : '<div class="empty-state"><span class="empty-glyph">♙</span><h3>尚无上榜玩家</h3></div>'
+        : `<div class="empty-state"><span class="empty-glyph">♙</span><h3>${esc(t('playersEmpty', {}, lang))}</h3></div>`
       }
+      <div class="board-foot"><span>${esc(t('playersFbFoot', {}, lang))}</span></div>
     </div>
     <div class="two-cards">
       <article class="rule-card">
         <span class="rule-num">∞</span>
-        <h3>所选期持榜数</h3>
-        <p>统计所选期次里当前仍在榜的成绩。同一期内被超越并下榜后，该成绩从统计中扣除。</p>
+        <h3>${esc(t('fbRuleCard1Title', {}, lang))}</h3>
+        <p>${esc(t('fbRuleCard1Desc', {}, lang))}</p>
       </article>
       <article class="rule-card">
         <span class="rule-num">✦</span>
-        <h3>历期持榜总数</h3>
-        <p>汇总各期榜单保留的成绩，同一玩家在重复关卡里的同塑造、同阵容只算一次。</p>
+        <h3>${esc(t('fbRuleCard2Title', {}, lang))}</h3>
+        <p>${esc(t('fbRuleCard2Desc', {}, lang))}</p>
       </article>
     </div>`;
 }
 
 function renderFlashbackRules() {
-  const items = [
-    ['01', '三个关卡', '每个游戏版本独立设置三个关卡，纪录不会跨版本或关卡比较。'],
-    ['02', '两种塑造', '全 0 塑造与全满塑造分榜比较。队伍内所有参战角色必须符合所选塑造组规则。'],
-    ['03', '零至六回合', '只能提交 0、1、2、3、4、5、6 回合的有效成绩，须上传通关截图供管理员核验。'],
-    ['04', '阵容识别', '提交主 C 与实际上场的完整队伍。相同角色组合视为同队，与角色填写顺序无关；主 C 并不拆分榜单。'],
-    ['05', '唯一保持者', '同队仅有回合最少者上榜；同回合数先提交者获胜。以数据库记录的提交时间为准，不受审核顺序影响。'],
-    ['06', '上榜次数', '每期按该期榜单保留的成绩计数。同一期内掉榜的成绩从次数中扣除，历期合计对重复关卡的同塑造同阵容去重。']
-  ];
+  const lang = getLang();
+  const items = t('rulesFbItems', {}, lang) || [];
   return `
+    ${renderGlobalServerNoticeHtml('fb-board', lang)}
     <div class="rules-grid">
       ${items.map(([num, title, desc]) => `
         <article class="rule-card">
-          <span class="rule-num">${num}</span>
-          <h3>${title}</h3>
-          <p>${desc}</p>
+          <span class="rule-num">${esc(num)}</span>
+          <h3>${esc(title)}</h3>
+          <p>${esc(desc)}</p>
         </article>`).join('')}
     </div>
     <div class="sidebar-note" style="margin-top:16px">
-      <strong>玩法参考：</strong>「焦点闪回」是《重返未来：1999》自 3.6 版本推出的周期挑战玩法，具体机制以游戏及中文 Wiki 对应期次为准；0–6 回合上限、塑造分组与唯一纪录为社区排行榜自定义规则。
+      ${esc(t('rulesFbNote', {}, lang))}
     </div>`;
 }
 
-/* ==================== 官方风格战报分享卡（证据跳转 + 直达链接 + Canvas 导出 PNG） ==================== */
+/* ==================== Record Archive Card Modal & Bilingual Canvas PNG Export ==================== */
 function loadCanvasImg(src) {
   if (!src) return Promise.resolve(null);
   return new Promise((resolve) => {
@@ -3145,38 +5085,134 @@ function drawCoverImage(ctx, img, dx, dy, dw, dh, alignY = 0.08) {
   ctx.drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh);
 }
 
+function fitCanvasFont(ctx, text, maxWidth, startPx, minPx, weight, family) {
+  let size = startPx;
+  while (size > minPx) {
+    ctx.font = `${weight} ${size}px ${family}`;
+    if (ctx.measureText(text).width <= maxWidth) break;
+    size -= 2;
+  }
+  ctx.font = `${weight} ${size}px ${family}`;
+  return size;
+}
+
 async function exportPosterPng(item) {
+  const lang = getLang();
+  const en = isEn(lang);
+  const obsidian = state.posterTheme === 'obsidian';
+  try {
+    if (document.fonts?.ready) await document.fonts.ready;
+  } catch {}
+
   const psychubes = item.psychubes || [];
+  const resonanceCodes = item.resonanceCodes || [];
   const hasPsychubes = psychubes.some(Boolean);
+  const hasResonance = resonanceCodes.some(Boolean);
   const W = 1200;
-  const H = hasPsychubes ? 760 : 680;
+  const H = hasPsychubes ? (hasResonance ? 806 : 770) : (hasResonance ? 726 : 684);
   const canvas = document.createElement('canvas');
   canvas.width = W;
   canvas.height = H;
   const ctx = canvas.getContext('2d');
   const isMane = item.mode === 'mane';
-  const serifFont = '"Noto Serif SC", "Songti SC", "Microsoft YaHei", Georgia, serif';
-  const displayFont = '"Cinzel", Georgia, serif';
+  const serifFont = en
+    ? '"UTTU Regular", "Playfair Display", Georgia, serif'
+    : '"Noto Serif SC", "UTTU Regular", "Songti SC", "Microsoft YaHei", serif';
+  const displayFont = en
+    ? '"Cinzel Decorative", "UTTU Regular", Georgia, serif'
+    : '"Cinzel Decorative", "Noto Serif SC", Georgia, serif';
+  const monoFont = '"UTTU Typewriter", "Courier New", monospace';
 
-  // 1. 羊皮纸底色渐变
+  // Theme Palette (Parchment vs. Obsidian Gold)
+  const pal = obsidian
+    ? {
+        bg0: '#211914',
+        bg1: '#15100d',
+        bg2: '#0e0b09',
+        fadeSolid: '#1b1410',
+        fadeMid: 'rgba(27,20,16,0.35)',
+        fadeEnd: 'rgba(27,20,16,0)',
+        wmAlpha: 0.2,
+        frameOuter: '#c89b54',
+        frameInner: 'rgba(229, 186, 115, 0.34)',
+        stripe: isMane ? '#df6931' : '#e5ba73',
+        kicker: '#e5ba73',
+        title: '#fbf4e8',
+        bossSub: '#d8a66a',
+        sub: '#c5b7a3',
+        rankNum: isMane ? '#f4b068' : '#f6cc78',
+        rankLabel: '#bfa98a',
+        divider: 'rgba(229, 186, 115, 0.32)',
+        labelMuted: '#b9a68c',
+        player: '#faf2e4',
+        carry: '#d2c2ac',
+        score: isMane ? '#f4b068' : '#f6cc78',
+        psyTitle: '#f5ebdc',
+        psySub: '#b8a892',
+        resBg: 'rgba(255, 245, 228, 0.08)',
+        resBorder: 'rgba(229, 186, 115, 0.34)',
+        resText: '#f3dfba',
+        cardBorder: '#9b7b4c',
+        cardCarryBorder: '#f0a056',
+        legacyBorder: 'rgba(229, 186, 115, 0.5)',
+        legacyText: '#efe2ce',
+        footLine: 'rgba(229, 186, 115, 0.28)',
+        footText: '#bda98e'
+      }
+    : {
+        bg0: '#f3eadb',
+        bg1: '#e2d4be',
+        bg2: '#d3c0a6',
+        fadeSolid: '#efe5d6',
+        fadeMid: 'rgba(239,229,214,0.2)',
+        fadeEnd: 'rgba(239,229,214,0)',
+        wmAlpha: 0.14,
+        frameOuter: '#8a5636',
+        frameInner: 'rgba(138, 86, 54, 0.35)',
+        stripe: isMane ? '#a83328' : '#b2863e',
+        kicker: isMane ? '#8c3426' : '#7b5b25',
+        title: '#1b120d',
+        bossSub: '#9c4e2e',
+        sub: '#5c4738',
+        rankNum: isMane ? '#b93a2b' : '#8d6423',
+        rankLabel: '#6b5241',
+        divider: 'rgba(90, 56, 36, 0.32)',
+        labelMuted: '#6b5241',
+        player: '#1c120d',
+        carry: '#5a4334',
+        score: isMane ? '#9c3d22' : '#8b5e1d',
+        psyTitle: '#2a1d15',
+        psySub: '#6b5241',
+        resBg: 'rgba(255, 252, 245, 0.65)',
+        resBorder: 'rgba(112, 74, 46, 0.38)',
+        resText: '#2f2017',
+        cardBorder: '#7c5238',
+        cardCarryBorder: '#df6931',
+        legacyBorder: 'rgba(138, 86, 54, 0.55)',
+        legacyText: '#3c2b21',
+        footLine: 'rgba(90, 56, 36, 0.3)',
+        footText: '#6b5241'
+      };
+
+  // 1. Background Gradient
   const bg = ctx.createLinearGradient(0, 0, W, H);
-  bg.addColorStop(0, '#f3eadb');
-  bg.addColorStop(0.55, '#e2d4be');
-  bg.addColorStop(1, '#d3c0a6');
+  bg.addColorStop(0, pal.bg0);
+  bg.addColorStop(0.55, pal.bg1);
+  bg.addColorStop(1, pal.bg2);
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, W, H);
 
-  // 2. 右上柔和首领水印（仅本地同源图片，零跨域污染）
+  // 2. Boss / Stage Watermark
   if (item.bossThumb) {
     const bossImg = await loadCanvasImg(item.bossThumb);
     if (bossImg) {
       ctx.save();
-      ctx.globalAlpha = 0.14;
+      ctx.globalAlpha = pal.wmAlpha;
       drawCoverImage(ctx, bossImg, W * 0.44, 0, W * 0.56, 280, 0.22);
       const fade = ctx.createLinearGradient(W * 0.44, 0, W, 0);
-      fade.addColorStop(0, '#efe5d6');
-      fade.addColorStop(0.45, 'rgba(239,229,214,0.2)');
-      fade.addColorStop(1, 'rgba(239,229,214,0)');
+      fade.addColorStop(0, pal.fadeSolid);
+      fade.addColorStop(0.45, pal.fadeMid);
+      fade.addColorStop(1, pal.fadeEnd);
       ctx.globalAlpha = 1;
       ctx.fillStyle = fade;
       ctx.fillRect(W * 0.44, 0, W * 0.56, 280);
@@ -3184,128 +5220,136 @@ async function exportPosterPng(item) {
     }
   }
 
-  // 3. 复古双线框与左朱红/金标线
-  ctx.strokeStyle = '#8a5636';
+  // 3. Double Hairline Frame & Accent Stripe
+  ctx.strokeStyle = pal.frameOuter;
   ctx.lineWidth = 4;
   ctx.strokeRect(16, 16, W - 32, H - 32);
-  ctx.strokeStyle = 'rgba(138, 86, 54, 0.35)';
+  ctx.strokeStyle = pal.frameInner;
   ctx.lineWidth = 1.5;
   ctx.strokeRect(26, 26, W - 52, H - 52);
 
-  ctx.fillStyle = isMane ? '#a83328' : '#b2863e';
+  ctx.fillStyle = pal.stripe;
   ctx.fillRect(16, 16, 10, H - 32);
 
-  // 4. 刊头文字区
-  ctx.fillStyle = isMane ? '#8c3426' : '#7b5b25';
-  ctx.font = `600 16px ${displayFont}`;
-  ctx.fillText(isMane ? 'MANE’S BULLETIN · 鬃毛邮报' : 'FLASHBACK ARCHIVE · 焦点闪回', 58, 72);
+  // 4. Masthead Header
+  ctx.fillStyle = pal.kicker;
+  ctx.font = `600 15px ${displayFont}`;
+  ctx.fillText(isMane ? t('posterKickerMane', {}, lang) : t('posterKickerFb', {}, lang), 58, 70);
 
-  ctx.fillStyle = '#1b120d';
-  ctx.font = `700 42px ${serifFont}`;
-  ctx.fillText(item.title || '', 58, 124);
-  if (item.bossEn) {
-    const titleW = ctx.measureText(item.title || '').width;
-    ctx.fillStyle = '#9c4e2e';
-    ctx.font = `italic 500 22px Georgia, serif`;
-    ctx.fillText(item.bossEn, Math.min(58 + titleW + 18, 760), 122);
+  const titleText = item.title || '';
+  const maxTitleW = W - 270;
+  ctx.fillStyle = pal.title;
+  fitCanvasFont(ctx, titleText, maxTitleW, 40, 24, '700', serifFont);
+  ctx.fillText(titleText, 58, 122, maxTitleW);
+
+  if (item.bossEn && !en) {
+    const titleW = Math.min(ctx.measureText(titleText).width, maxTitleW);
+    const subStartX = 58 + titleW + 16;
+    const availW = (W - 210) - subStartX;
+    if (availW > 120) {
+      ctx.fillStyle = pal.bossSub;
+      ctx.font = `italic 500 20px ${serifFont}`;
+      ctx.fillText(item.bossEn, subStartX, 120, availW);
+    }
   }
 
-  ctx.fillStyle = '#5c4738';
-  ctx.font = `500 17px ${serifFont}`;
+  ctx.fillStyle = pal.sub;
+  ctx.font = `500 16px ${serifFont}`;
   const subText = item.subtitle || '';
-  ctx.fillText(subText, 58, 158);
+  ctx.fillText(subText, 58, 156, W - 260);
   if (!isMane && item.resonanceTen) {
-    const subW = ctx.measureText(subText).width;
-    const tagText = '✦ 全0塑 · 共鸣10';
-    ctx.font = `700 13px ${serifFont}`;
+    const subW = Math.min(ctx.measureText(subText).width, W - 460);
+    const tagText = t('posterRes10Badge', {}, lang);
+    ctx.font = `700 12px ${serifFont}`;
     const tagW = ctx.measureText(tagText).width + 18;
     const tagX = 58 + subW + 14;
-    const tagY = 140;
+    const tagY = 138;
     ctx.fillStyle = '#3d2c1b';
     ctx.fillRect(tagX, tagY, tagW, 24);
     ctx.strokeStyle = '#8d6423';
     ctx.lineWidth = 1;
     ctx.strokeRect(tagX, tagY, tagW, 24);
     ctx.fillStyle = '#f8db9e';
-    ctx.fillText(tagText, tagX + 9, 157);
+    ctx.fillText(tagText, tagX + 9, 155);
   }
 
-  // 右上名次印章
+  // Right Rank Stamp
   ctx.textAlign = 'right';
-  ctx.fillStyle = isMane ? '#b93a2b' : '#8d6423';
-  ctx.font = `700 58px ${displayFont}`;
-  ctx.fillText(item.rank > 0 ? `#${String(item.rank).padStart(2, '0')}` : '每日', W - 58, 124);
-  ctx.fillStyle = '#6b5241';
-  ctx.font = `600 14px ${displayFont}`;
-  ctx.fillText(item.rank > 0 ? 'ARCHIVE RANK' : 'DAILY APPROVED', W - 58, 152);
+  ctx.fillStyle = pal.rankNum;
+  ctx.font = `700 52px ${displayFont}`;
+  ctx.fillText(item.rank > 0 ? `#${String(item.rank).padStart(2, '0')}` : t('posterDailyLabel', {}, lang), W - 58, 122);
+  ctx.fillStyle = pal.rankLabel;
+  ctx.font = `600 13px ${displayFont}`;
+  ctx.fillText(item.rank > 0 ? t('posterRankLabel', {}, lang) : t('posterDailyLabel', {}, lang), W - 58, 150);
   ctx.textAlign = 'left';
 
-  // 分割线
-  ctx.strokeStyle = 'rgba(90, 56, 36, 0.32)';
+  // Divider
+  ctx.strokeStyle = pal.divider;
   ctx.lineWidth = 1.5;
   ctx.beginPath();
-  ctx.moveTo(58, 182);
-  ctx.lineTo(W - 58, 182);
+  ctx.moveTo(58, 180);
+  ctx.lineTo(W - 58, 180);
   ctx.stroke();
 
-  // 5. 调查员与成绩区
-  ctx.fillStyle = '#6b5241';
-  ctx.font = `600 14px ${displayFont}`;
-  ctx.fillText('INVESTIGATOR · 调查员', 58, 218);
+  // 5. Investigator & Result
+  ctx.fillStyle = pal.labelMuted;
+  ctx.font = `600 13px ${displayFont}`;
+  ctx.fillText(t('posterInvestigator', {}, lang), 58, 216);
 
-  ctx.fillStyle = '#1c120d';
-  ctx.font = `700 32px ${serifFont}`;
-  ctx.fillText(item.player || '', 58, 258);
+  ctx.fillStyle = pal.player;
+  fitCanvasFont(ctx, item.player || '', 560, 30, 20, '700', serifFont);
+  ctx.fillText(item.player || '', 58, 256, 560);
 
-  ctx.fillStyle = '#5a4334';
-  ctx.font = `500 18px ${serifFont}`;
-  ctx.fillText(`主 C：${item.carry || ''}`, 58, 290);
+  ctx.fillStyle = pal.carry;
+  ctx.font = `500 17px ${serifFont}`;
+  ctx.fillText(`${t('mainDpsLabel', {}, lang)}: ${item.carry || ''}`, 58, 288, 600);
 
   if (isMane) {
-    const grade = resolveManeGrade(item.score);
+    const grade = resolveManeGrade(item.score, lang);
     const gradeImg = grade.img ? await loadCanvasImg(grade.img) : null;
     const scoreRight = gradeImg ? W - 144 : W - 58;
     ctx.textAlign = 'right';
-    ctx.fillStyle = '#6b5241';
-    ctx.font = `600 14px ${serifFont}`;
-    ctx.fillText('调查积分', scoreRight, 218);
-    ctx.fillStyle = '#9c3d22';
-    ctx.font = `700 44px ${displayFont}`;
-    ctx.fillText(formatScore(item.score), scoreRight, 268);
+    ctx.fillStyle = pal.labelMuted;
+    ctx.font = `600 13px ${serifFont}`;
+    ctx.fillText(t('scoreLabel', {}, lang), scoreRight, 216);
+    ctx.fillStyle = pal.score;
+    ctx.font = `700 42px ${displayFont}`;
+    ctx.fillText(formatScore(item.score, lang), scoreRight, 266);
     ctx.textAlign = 'left';
     if (gradeImg) {
-      ctx.drawImage(gradeImg, W - 130, 204, 72, 72);
+      ctx.drawImage(gradeImg, W - 130, 202, 72, 72);
     }
   } else {
     ctx.textAlign = 'right';
-    ctx.fillStyle = '#6b5241';
-    ctx.font = `600 14px ${serifFont}`;
-    ctx.fillText('通关成绩', W - 58, 218);
-    ctx.fillStyle = '#8b5e1d';
-    ctx.font = `700 44px ${serifFont}`;
-    ctx.fillText(`${item.rounds} 回合`, W - 58, 268);
+    ctx.fillStyle = pal.labelMuted;
+    ctx.font = `600 13px ${serifFont}`;
+    ctx.fillText(t('colRounds', {}, lang), W - 58, 216);
+    ctx.fillStyle = pal.score;
+    ctx.font = `700 42px ${serifFont}`;
+    ctx.fillText(formatRounds(item.rounds, lang), W - 58, 266);
     ctx.textAlign = 'left';
   }
 
-  // 6. 上阵阵容卡（含原表简写解码、灵活多选拼图与自由位，复用本地官方立绘）
-  const parsedSlots = parseLineupSlots(item.team, item.carry);
+  // 6. Deployed Squad Portrait Cards, Docked Psychubes & Non-Empty Resonance Codes
+  const parsedSlots = parseLineupSlots(item.team, item.rawCarry || item.carry);
   if (parsedSlots.length === 1 && parsedSlots[0].type === 'legacy') {
     ctx.save();
-    ctx.strokeStyle = 'rgba(138, 86, 54, 0.55)';
+    ctx.strokeStyle = pal.legacyBorder;
     ctx.setLineDash([6, 4]);
-    ctx.strokeRect(58, 344, W - 116, 110);
-    ctx.fillStyle = '#3c2b21';
+    ctx.strokeRect(58, 342, W - 116, 110);
+    ctx.fillStyle = pal.legacyText;
     ctx.font = `600 22px ${serifFont}`;
-    ctx.fillText(`原表配队：${parsedSlots[0].raw}`, 82, 408);
+    ctx.fillText(`${t('legacyTeamLabel', {}, lang)}: ${parsedSlots[0].raw}`, 82, 406, W - 160);
     ctx.restore();
   } else if (parsedSlots.length) {
-    const carrySet = new Set(splitCarries(item.carry).map(canonicalCharacterKey));
-    const cardW = 192;
-    const cardH = 256;
-    const gap = 22;
+    const carrySet = new Set(splitCarries(item.rawCarry || item.carry).map(canonicalCharacterKey));
+    const cardW = 248;
+    const cardH = 262;
+    const gap = 30;
     const startX = 58;
-    const startY = 324;
+    const startY = 320;
     const cardBaseImg = await loadCanvasImg('./assets/uttu/bg_kapaidi.png');
+    const mainTag = en ? 'MAIN' : '主C';
 
     for (let i = 0; i < Math.min(4, parsedSlots.length); i++) {
       const slot = parsedSlots[i];
@@ -3317,6 +5361,7 @@ async function exportPosterPng(item) {
       ctx.fillRect(x, y, cardW, cardH);
 
       if (slot.type === 'flex') {
+        const fmt = formatFlexSlot(slot, lang);
         const pics = slot.chars.slice(0, 4);
         if (pics.length <= 2) {
           const halfW = cardW / pics.length;
@@ -3338,23 +5383,20 @@ async function exportPosterPng(item) {
         ctx.fillStyle = grad;
         ctx.fillRect(x, y + cardH - 86, cardW, 86);
         ctx.fillStyle = 'rgba(28, 22, 18, 0.88)';
-        ctx.fillRect(x + cardW - 64, y + 8, 56, 22);
+        ctx.fillRect(x + cardW - 72, y + 8, 64, 22);
         ctx.fillStyle = '#f3d191';
-        ctx.font = `700 12px ${serifFont}`;
+        ctx.font = `700 11px ${serifFont}`;
         ctx.textAlign = 'center';
-        ctx.fillText(slot.tag, x + cardW - 36, y + 23);
+        ctx.fillText(fmt.tag, x + cardW - 40, y + 23, 60);
         ctx.fillStyle = '#fffdf9';
-        ctx.font = `600 17px ${serifFont}`;
-        ctx.fillText(slot.label, x + cardW / 2, y + cardH - 14, cardW - 14);
+        ctx.font = `600 16px ${serifFont}`;
+        ctx.fillText(fmt.label, x + cardW / 2, y + cardH - 14, cardW - 14);
         ctx.textAlign = 'left';
-        ctx.strokeStyle = '#9c7853';
+        ctx.strokeStyle = pal.cardBorder;
         ctx.lineWidth = 1.5;
         ctx.strokeRect(x, y, cardW, cardH);
-        ctx.restore();
-        continue;
-      }
-
-      if (slot.type === 'wild') {
+      } else if (slot.type === 'wild') {
+        const fmt = formatWildSlot(slot, lang);
         if (cardBaseImg) {
           ctx.globalAlpha = 0.55;
           drawCoverImage(ctx, cardBaseImg, x, y, cardW, cardH, 0.5);
@@ -3366,119 +5408,136 @@ async function exportPosterPng(item) {
         ctx.fillText('✦', x + cardW / 2, y + cardH / 2 - 6);
         ctx.fillStyle = '#b9a693';
         ctx.font = `600 14px ${serifFont}`;
-        ctx.fillText('自由位', x + cardW / 2, y + cardH / 2 + 24);
+        ctx.fillText(fmt.sub, x + cardW / 2, y + cardH / 2 + 24);
         ctx.fillStyle = '#fffdf9';
-        ctx.font = `600 17px ${serifFont}`;
-        ctx.fillText(slot.label, x + cardW / 2, y + cardH - 14, cardW - 14);
+        ctx.font = `600 16px ${serifFont}`;
+        ctx.fillText(fmt.label, x + cardW / 2, y + cardH - 14, cardW - 14);
         ctx.textAlign = 'left';
-        ctx.strokeStyle = '#8a6b4d';
+        ctx.strokeStyle = pal.cardBorder;
         ctx.setLineDash([5, 4]);
         ctx.lineWidth = 1.5;
         ctx.strokeRect(x, y, cardW, cardH);
-        ctx.restore();
-        continue;
-      }
-
-      const rawName = slot.raw || '';
-      const char = slot.char || resolveCharacter(rawName);
-      const displayName = char?.name || canonicalDisplayName(rawName);
-      const affKey = char?.aff || resolveAfflatus(rawName);
-      const aff = AFFLATUS_META[affKey] || AFFLATUS_META.unknown;
-      const isCarry = carrySet.has(char ? `char:${char.id}` : canonicalCharacterKey(rawName));
-
-      if (cardBaseImg) {
-        ctx.globalAlpha = 0.72;
-        drawCoverImage(ctx, cardBaseImg, x, y, cardW, cardH, 0.5);
-        ctx.globalAlpha = 1;
-      }
-
-      if (char?.portrait) {
-        const pic = await loadCanvasImg(char.portrait);
-        if (pic) {
-          drawCoverImage(ctx, pic, x, y, cardW, cardH, 0.06);
-        }
+        ctx.setLineDash([]);
       } else {
-        ctx.fillStyle = 'rgba(237,228,215,0.45)';
-        ctx.font = `700 32px ${serifFont}`;
-        ctx.textAlign = 'center';
-        ctx.fillText(characterMonogram(displayName), x + cardW / 2, y + cardH / 2);
-        ctx.textAlign = 'left';
-      }
+        const rawName = slot.raw || '';
+        const char = slot.char || resolveCharacter(rawName);
+        const displayName = char ? displayCharacterName(char.name, lang) : displayCharacterName(rawName, lang);
+        const affKey = char?.aff || resolveAfflatus(rawName);
+        const aff = AFFLATUS_META[affKey] || AFFLATUS_META.unknown;
+        const isCarry = carrySet.has(char ? `char:${char.id}` : canonicalCharacterKey(rawName));
 
-      const rarImg = await loadCanvasImg(rarityOverlaySrc(char?.star || 6));
-      if (rarImg) {
-        const rarH = cardW * (rarImg.naturalHeight / rarImg.naturalWidth);
-        ctx.drawImage(rarImg, x - 4, y + cardH - rarH + 4, cardW + 8, rarH);
-      }
-
-      const grad = ctx.createLinearGradient(0, y + cardH - 86, 0, y + cardH);
-      grad.addColorStop(0, 'rgba(10,8,7,0)');
-      grad.addColorStop(1, 'rgba(10,8,7,0.88)');
-      ctx.fillStyle = grad;
-      ctx.fillRect(x, y + cardH - 86, cardW, 86);
-
-      if (aff.icon) {
-        const affImg = await loadCanvasImg(aff.icon);
-        if (affImg) {
-          const aw = 30;
-          const ah = aw * (affImg.naturalHeight / affImg.naturalWidth);
-          ctx.drawImage(affImg, x + 8, y, aw, ah);
+        if (cardBaseImg) {
+          ctx.globalAlpha = 0.72;
+          drawCoverImage(ctx, cardBaseImg, x, y, cardW, cardH, 0.5);
+          ctx.globalAlpha = 1;
         }
-      }
 
-      if (isCarry) {
-        ctx.fillStyle = isMane ? '#a83328' : '#d4a85a';
-        ctx.fillRect(x + cardW - 48, y + 8, 40, 22);
-        ctx.fillStyle = isMane ? '#fff6ee' : '#18130d';
-        ctx.font = `700 13px ${serifFont}`;
+        if (char?.portrait) {
+          const pic = await loadCanvasImg(char.portrait);
+          if (pic) {
+            drawCoverImage(ctx, pic, x, y, cardW, cardH, 0.06);
+          }
+        } else {
+          ctx.fillStyle = 'rgba(237,228,215,0.45)';
+          ctx.font = `700 32px ${serifFont}`;
+          ctx.textAlign = 'center';
+          ctx.fillText(characterMonogram(displayName), x + cardW / 2, y + cardH / 2);
+          ctx.textAlign = 'left';
+        }
+
+        const rarImg = await loadCanvasImg(rarityOverlaySrc(char?.star || 6));
+        if (rarImg) {
+          const rarH = cardW * (rarImg.naturalHeight / rarImg.naturalWidth);
+          ctx.drawImage(rarImg, x - 4, y + cardH - rarH + 4, cardW + 8, rarH);
+        }
+
+        const grad = ctx.createLinearGradient(0, y + cardH - 86, 0, y + cardH);
+        grad.addColorStop(0, 'rgba(10,8,7,0)');
+        grad.addColorStop(1, 'rgba(10,8,7,0.9)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(x, y + cardH - 86, cardW, 86);
+
+        if (aff.icon) {
+          const affImg = await loadCanvasImg(aff.icon);
+          if (affImg) {
+            const aw = 30;
+            const ah = aw * (affImg.naturalHeight / affImg.naturalWidth);
+            ctx.drawImage(affImg, x + 8, y, aw, ah);
+          }
+        }
+
+        if (isCarry) {
+          ctx.fillStyle = isMane ? '#a83328' : '#d4a85a';
+          ctx.fillRect(x + cardW - 56, y + 8, 48, 22);
+          ctx.fillStyle = isMane ? '#fff6ee' : '#18130d';
+          ctx.font = `700 12px ${displayFont}`;
+          ctx.textAlign = 'center';
+          ctx.fillText(mainTag, x + cardW - 32, y + 23);
+          ctx.textAlign = 'left';
+        }
+
+        ctx.fillStyle = '#fffdf9';
+        fitCanvasFont(ctx, displayName, cardW - 18, 17, 13, '600', serifFont);
         ctx.textAlign = 'center';
-        ctx.fillText('主C', x + cardW - 28, y + 24);
+        ctx.fillText(displayName, x + cardW / 2, y + cardH - 14, cardW - 16);
         ctx.textAlign = 'left';
+
+        ctx.strokeStyle = isCarry ? pal.cardCarryBorder : pal.cardBorder;
+        ctx.lineWidth = isCarry ? 3 : 1.5;
+        ctx.strokeRect(x, y, cardW, cardH);
       }
 
-      ctx.fillStyle = '#fffdf9';
-      ctx.font = `600 18px ${serifFont}`;
-      ctx.textAlign = 'center';
-      ctx.fillText(displayName, x + cardW / 2, y + cardH - 14, cardW - 14);
-      ctx.textAlign = 'left';
-
-      ctx.strokeStyle = isCarry ? '#df6931' : '#7c5238';
-      ctx.lineWidth = isCarry ? 3 : 1.5;
-      ctx.strokeRect(x, y, cardW, cardH);
-
-      // 若该槽位录入了心相，则在角色卡正下方绘制心相双层方框与名称
+      let nextY = y + cardH + 12;
       if (hasPsychubes && psychubes[i]) {
         const psy = resolvePsychube(psychubes[i]);
-        const py = y + cardH + 12;
-        const pBox = 52;
+        const pBox = 50;
         if (psy) {
           const pBg = await loadCanvasImg(psychubeFrameSrc(psy.star));
           const pIcon = await loadCanvasImg(psychubeIconSrc(psy.id));
-          if (pBg) ctx.drawImage(pBg, x, py, pBox, pBox);
-          if (pIcon) ctx.drawImage(pIcon, x, py, pBox, pBox);
-          ctx.strokeStyle = '#8a5636';
+          if (pBg) ctx.drawImage(pBg, x, nextY, pBox, pBox);
+          if (pIcon) ctx.drawImage(pIcon, x, nextY, pBox, pBox);
+          ctx.strokeStyle = pal.frameOuter;
           ctx.lineWidth = 1;
-          ctx.strokeRect(x, py, pBox, pBox);
+          ctx.strokeRect(x, nextY, pBox, pBox);
         }
-        const psyTitle = psy?.name || psychubes[i];
+        const psyTitle = displayPsychubeName(psy || psychubes[i], lang);
         const tx = psy ? x + pBox + 10 : x;
         const maxTw = psy ? cardW - pBox - 10 : cardW;
-        ctx.fillStyle = '#2a1d15';
-        ctx.font = `600 15px ${serifFont}`;
-        ctx.fillText(psyTitle, tx, py + 23, maxTw);
+        ctx.fillStyle = pal.psyTitle;
+        ctx.font = `600 14px ${serifFont}`;
+        ctx.fillText(psyTitle, tx, nextY + 21, maxTw);
         if (psy) {
-          ctx.fillStyle = '#6b5241';
+          ctx.fillStyle = pal.psySub;
           ctx.font = `500 12px ${serifFont}`;
-          ctx.fillText(`${psy.star}★ · ${psy.stat}`, tx, py + 43, maxTw);
+          ctx.fillText(`${psy.star}★ · ${displayPsychubeStat(psy, lang)}`, tx, nextY + 41, maxTw);
+        }
+        nextY += pBox + 8;
+      } else if (hasPsychubes) {
+        nextY += 58;
+      }
+
+      if (hasResonance && resonanceCodes[i]) {
+        const codeStr = String(resonanceCodes[i]).trim();
+        if (codeStr) {
+          const rH = 26;
+          ctx.fillStyle = pal.resBg;
+          ctx.fillRect(x, nextY, cardW, rH);
+          ctx.strokeStyle = pal.resBorder;
+          ctx.lineWidth = 1;
+          ctx.strokeRect(x, nextY, cardW, rH);
+          ctx.fillStyle = pal.resText;
+          ctx.font = `600 11px ${monoFont}`;
+          ctx.fillText(codeStr, x + 7, nextY + 17, cardW - 14);
         }
       }
+
       ctx.restore();
     }
   }
 
-  // 7. 底部档案注脚
-  const footLineY = H - 72;
-  ctx.strokeStyle = 'rgba(90, 56, 36, 0.3)';
+  // 7. Archive Footer
+  const footLineY = H - 64;
+  ctx.strokeStyle = pal.footLine;
   ctx.lineWidth = 1;
   ctx.setLineDash([6, 4]);
   ctx.beginPath();
@@ -3487,39 +5546,62 @@ async function exportPosterPng(item) {
   ctx.stroke();
   ctx.setLineDash([]);
 
-  ctx.fillStyle = '#6b5241';
-  ctx.font = `500 14px ${displayFont}`;
-  ctx.fillText(`RECORDED ${item.date || ''}`, 58, footLineY + 28);
+  ctx.fillStyle = pal.footText;
+  ctx.font = `500 13px ${monoFont}`;
+  ctx.fillText(t('posterRecordedAt', { date: item.date || '' }, lang), 58, footLineY + 28);
   ctx.textAlign = 'right';
-  ctx.fillText('REVERSE: 1999 · COMMUNITY LEADERBOARD ARCHIVE', W - 58, footLineY + 28);
+  ctx.fillText(t('posterCommunityFooter', {}, lang), W - 58, footLineY + 28);
   ctx.textAlign = 'left';
 
   const safeTitle = String(item.title || 'record').replace(/[\\/:*?"<>|\s]+/g, '-');
   const rankSuffix = item.rank > 0 ? `rank${item.rank}` : 'daily';
-  const fileName = `r1999-${item.mode}-${safeTitle}-${rankSuffix}.png`;
-  const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
-  if (!blob) throw new Error('浏览器未能导出纪录图片。');
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = fileName;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 4000);
+  const themeSuffix = obsidian ? '-obsidian' : '';
+  const fileName = `r1999-${item.mode}-${safeTitle}-${rankSuffix}${themeSuffix}.png`;
+
+  try {
+    const blob = await new Promise((resolve, reject) => {
+      try {
+        canvas.toBlob((b) => resolve(b), 'image/png');
+      } catch (err) {
+        reject(err);
+      }
+    });
+    if (!blob) throw new Error('SecurityError');
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  } catch (err) {
+    if (err?.name === 'SecurityError' || /tainted|SecurityError/i.test(String(err?.message || ''))) {
+      throw new Error(
+        L(
+          'Browser security blocks PNG export on file://. Double-click Start-Offline-Preview.bat to run via local http://localhost and export PNGs.',
+          '本地 file:// 协议下浏览器限制画布导出 PNG，请双击 Start-Offline-Preview.bat 通过本地服务打开即可一键保存。',
+          lang
+        )
+      );
+    }
+    throw err;
+  }
 }
 
 function openPoster(posterId) {
+  const lang = getLang();
   const item = posterIndex.get(posterId);
   if (!item) return;
+  closeGlossaryPopover();
 
   const isMane = item.mode === 'mane';
   const resultHtml = isMane
     ? `<div style="display:flex;align-items:center;gap:10px">
-         <span class="poster-score">${formatScore(item.score)}</span>
-         ${renderGradeStamp(item.score)}
+         <span class="poster-score">${formatScore(item.score, lang)}</span>
+         ${renderGradeStamp(item.score, lang)}
        </div>`
-    : `<span class="poster-score">${item.rounds} 回合</span>`;
+    : `<span class="poster-score">${esc(formatRounds(item.rounds, lang))}</span>`;
 
   let safeUrl = '';
   let urlHost = '';
@@ -3533,34 +5615,34 @@ function openPoster(posterId) {
   const evidenceHtml = safeUrl
     ? `<div class="poster-evidence-bar has-link">
          <div>
-           <strong>已附公开通关视频 / 攻略参考</strong>
-           <span>来源域名：${esc(urlHost)} · 核验结算截图仅本人及管理员可见</span>
+           <strong>${esc(t('posterEvidenceHasLink', {}, lang))}</strong>
+           <span>${esc(t('posterEvidenceDomain', { host: urlHost }, lang))}</span>
          </div>
-         <a class="copper-btn" href="${esc(safeUrl)}" target="_blank" rel="noopener noreferrer ugc">▶ 打开视频 / 攻略 ↗</a>
+         <a class="copper-btn" href="${esc(safeUrl)}" target="_blank" rel="noopener noreferrer ugc">${esc(t('posterEvidenceOpen', {}, lang))}</a>
        </div>`
     : `<div class="poster-evidence-bar">
-         <span>本条投稿未附公开视频或攻略链接；核验结算截图按隐私规则仅本人与审核管理员可见。</span>
+         <span>${esc(t('posterEvidenceNoLink', {}, lang))}</span>
        </div>`;
 
   const psychubes = item.psychubes || [];
   const resonanceCodes = item.resonanceCodes || [];
-  const slotNames = (item.canonicalTeam && item.canonicalTeam.length && !isLegacyShorthandTeam(item.team))
-    ? item.canonicalTeam
-    : (item.team || []);
+  const slotNames = (item.displayTeam && item.displayTeam.length && !isLegacyShorthandTeam(item.team))
+    ? item.displayTeam
+    : (item.team || []).map((n) => displayCharacterName(n, lang));
   const hasAnyBuilds = psychubes.some(Boolean) || resonanceCodes.some(Boolean);
   const slotCount = Math.max(slotNames.length, psychubes.length, resonanceCodes.length);
   const nonEmptyRes = Array.from({ length: Math.min(4, slotCount) }, (_, idx) => ({
     idx,
     code: resonanceCodes[idx] || '',
-    name: slotNames[idx] || `${idx + 1}号位`
+    name: slotNames[idx] || t('slotLabel', { n: idx + 1 }, lang)
   })).filter((entry) => entry.code);
 
   const buildsHtml = hasAnyBuilds
     ? `<div class="poster-builds-section">
          <div class="poster-builds-header">
-           <div class="poster-builds-heading">PSYCHUBES &amp; RESONANCE · 心相与共鸣配置</div>
+           <div class="poster-builds-heading">${esc(t('posterBuildsHeading', {}, lang))}</div>
            ${nonEmptyRes.length >= 2
-             ? `<button type="button" class="poster-res-copy-all" data-copy-all-res="${esc(posterId)}">一键复制全队共鸣码（${nonEmptyRes.length}条）</button>`
+             ? `<button type="button" class="poster-res-copy-all" data-copy-all-res="${esc(posterId)}">${esc(t('posterCopyAllRes', { n: nonEmptyRes.length }, lang))}</button>`
              : ''}
          </div>
          <div class="poster-builds-grid">
@@ -3569,7 +5651,8 @@ function openPoster(posterId) {
              const rCode = resonanceCodes[idx] || '';
              if (!pName && !rCode) return '';
              const psy = pName ? resolvePsychube(pName) : null;
-             const charTitle = slotNames[idx] || `${idx + 1}号位`;
+             const psyLabel = displayPsychubeName(psy || pName, lang);
+             const charTitle = slotNames[idx] || t('slotLabel', { n: idx + 1 }, lang);
              return `
                <div class="poster-build-card">
                  <div class="poster-build-top">
@@ -3578,109 +5661,118 @@ function openPoster(posterId) {
                  </div>
                  <div class="poster-build-main">
                    ${pName
-                     ? `<div class="poster-build-psy">
-                          ${renderPsychubeThumbHtml(pName, 'in-poster')}
+                     ? `<div class="poster-build-psy" data-open-psy="${esc(psy ? psy.id : pName)}" role="button" tabindex="0" style="cursor:pointer">
+                          ${renderPsychubeThumbHtml(pName, 'in-poster', lang)}
                           <div class="poster-psy-info">
-                            <strong>${esc(psy?.name || pName)}</strong>
-                            ${psy ? `<span>${psy.star}★ · ${esc(psy.stat)}</span>` : ''}
+                            <strong>${esc(psyLabel)}</strong>
+                            ${psy ? `<span>${psy.star}★ · ${esc(displayPsychubeStat(psy, lang))}</span>` : ''}
                           </div>
                         </div>`
-                     : `<div class="poster-build-psy-empty">未附带心相</div>`
+                     : `<div class="poster-build-psy-empty">${esc(t('posterNoPsy', {}, lang))}</div>`
                    }
                    ${rCode
                      ? `<div class="poster-res-row">
                           <code class="poster-res-code" title="${esc(rCode)}">${esc(rCode)}</code>
-                          <button type="button" class="poster-res-copy" data-copy-res-id="${esc(posterId)}" data-copy-res-idx="${idx}">复制共鸣码</button>
+                          <button type="button" class="poster-res-copy" data-copy-res-id="${esc(posterId)}" data-copy-res-idx="${idx}">${esc(t('posterCopyRes', {}, lang))}</button>
                         </div>`
-                     : `<div class="poster-res-empty">未附带共鸣码</div>`
+                     : ''
                    }
                  </div>
                </div>`;
            }).join('')}
          </div>
        </div>`
-    : `<div class="poster-builds-empty">本条纪录暂未附带心相与共鸣码配置（支持新投稿或管理员编辑补充）。</div>`;
+    : `<div class="poster-builds-empty">${esc(t('posterNoBuilds', {}, lang))}</div>`;
 
+  const isObsidian = state.posterTheme === 'obsidian';
   openModal(`
-    <div class="modal-eyebrow">ARCHIVE RECORD CARD · 纪录留档</div>
-    <h2>纪录留档卡</h2>
-    <p class="modal-subtitle">支持直达原攻略链接、查看心相与一键复制共鸣码，或导出 PNG 纪录图。</p>
-    <div class="poster-card ${item.bossThumb ? 'has-boss-watermark' : ''}">
+    <div class="modal-eyebrow">${esc(t('posterEyebrow', {}, lang))}</div>
+    <h2>${esc(t('posterTitle', {}, lang))}</h2>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+      <p class="modal-subtitle" style="margin:0">${esc(t('posterSubtitle', {}, lang))}</p>
+      <div class="poster-theme-toggle" role="group" aria-label="${esc(t('posterTitle', {}, lang))}" style="margin-bottom:0">
+        <button type="button" class="${!isObsidian ? 'active' : ''}" data-poster-theme="parchment" aria-pressed="${!isObsidian}">${esc(t('posterThemeParchment', {}, lang))}</button>
+        <button type="button" class="${isObsidian ? 'active' : ''}" data-poster-theme="obsidian" aria-pressed="${isObsidian}">${esc(t('posterThemeObsidian', {}, lang))}</button>
+      </div>
+    </div>
+    <div class="poster-card ${item.bossThumb ? 'has-boss-watermark' : ''} ${isObsidian ? 'is-obsidian' : ''}" id="activePosterCard">
       ${item.bossThumb ? `<div class="poster-boss-wm" style="background-image:url('${esc(item.bossThumb)}')" aria-hidden="true"></div>` : ''}
       <div class="poster-head">
         <div>
-          <div class="poster-kicker">${isMane ? 'MANE’S BULLETIN · 鬃毛邮报' : 'FLASHBACK ARCHIVE · 焦点闪回'}</div>
+          <div class="poster-kicker">${esc(isMane ? t('posterKickerMane', {}, lang) : t('posterKickerFb', {}, lang))}</div>
           <h3>${esc(item.title)}</h3>
           <div class="poster-sub-row">
             <div class="poster-sub">${esc(item.subtitle)}</div>
-            ${!isMane && item.resonanceTen ? '<span class="poster-res10-badge">✦ 全0塑 · 共鸣10</span>' : ''}
+            ${!isMane && item.resonanceTen ? `<span class="poster-res10-badge">${esc(t('posterRes10Badge', {}, lang))}</span>` : ''}
           </div>
         </div>
         <div class="poster-rank-box">
-          <div class="poster-rank-num">${item.rank > 0 ? `#${String(item.rank).padStart(2, '0')}` : '每日'}</div>
-          <div class="poster-rank-label">${item.rank > 0 ? 'RANK' : 'DAILY'}</div>
+          <div class="poster-rank-num">${item.rank > 0 ? `#${String(item.rank).padStart(2, '0')}` : esc(t('posterDailyLabel', {}, lang))}</div>
+          <div class="poster-rank-label">${esc(item.rank > 0 ? t('posterRankLabel', {}, lang) : t('posterDailyLabel', {}, lang))}</div>
         </div>
       </div>
 
       <div class="poster-body">
         <div>
-          <div style="font-size:11px;color:#6b5241;letter-spacing:0.1em">INVESTIGATOR · 调查员</div>
-          <div class="poster-player">${esc(item.player)}</div>
-          <div style="font-size:12px;color:#5b4739;margin-top:3px">主 C：${esc(item.carry)}</div>
+          <div style="font-size:11px;opacity:0.72;letter-spacing:0.1em">${esc(t('posterInvestigator', {}, lang))}</div>
+          <div class="poster-player is-player-name">${esc(item.player)}</div>
+          <div style="font-size:12px;opacity:0.82;margin-top:3px">${esc(t('mainDpsLabel', {}, lang))}: ${esc(item.carry)}</div>
         </div>
         <div>${resultHtml}</div>
       </div>
 
-      ${renderFormationHtml(item.team, item.carry)}
+      ${renderFormationHtml(item.team, item.rawCarry || item.carry, psychubes, lang)}
       ${buildsHtml}
 
       <div class="poster-foot">
-        <span>RECORDED ${esc(item.date)}</span>
-        <span>REVERSE: 1999 COMMUNITY</span>
+        <span>${esc(t('posterRecordedAt', { date: item.date }, lang))}</span>
+        <span>${esc(t('posterCommunityFooter', {}, lang))}</span>
       </div>
     </div>
     ${evidenceHtml}
     <div class="form-actions">
-      <button type="button" class="paper-btn" data-export-poster="${esc(posterId)}">保存纪录图 (PNG)</button>
-      <button type="button" class="outline-btn" data-copy-link="${esc(posterId)}">复制直达链接</button>
-      <button type="button" class="outline-btn" data-copy-poster="${esc(posterId)}">复制纪录文字</button>
-      <button type="button" class="ghost-btn" data-action="close-modal">关闭</button>
+      <button type="button" class="paper-btn" data-export-poster="${esc(posterId)}">${esc(t('posterBtnSavePng', {}, lang))}</button>
+      <button type="button" class="outline-btn" data-copy-link="${esc(posterId)}">${esc(t('posterBtnCopyLink', {}, lang))}</button>
+      <button type="button" class="outline-btn" data-copy-poster="${esc(posterId)}">${esc(t('posterBtnCopyText', {}, lang))}</button>
+      <button type="button" class="ghost-btn" data-action="close-modal">${esc(t('posterBtnClose', {}, lang))}</button>
     </div>`, true);
 }
 
-/* ==================== 投稿模态框与完整校验（双榜 100% 兼容） ==================== */
-function maneMapChoices(maps, selected) {
-  return Object.entries(MANE_SECTIONS).map(([sec, label]) => {
+/* ==================== Submit / Edit Modals & Offline Sandbox Submission ==================== */
+function maneMapChoices(maps, selected, lang = getLang()) {
+  return SECTION_KEYS.map((sec) => {
     const group = maps.filter((m) => m.section === sec);
     if (!group.length) return '';
-    return `<optgroup label="${esc(label)}">${optionsHtml(group.map((m) => [m.id, `${m.edition} · ${m.name}`]), selected)}</optgroup>`;
+    return `<optgroup label="${esc(localizeSection(sec, lang))}">${optionsHtml(group.map((m) => [m.id, `${m.edition} · ${displayBossName(m.name, lang)}`]), selected)}</optgroup>`;
   }).join('');
 }
 
-function maneScoreFieldsHtml(record, maps) {
+function maneScoreFieldsHtml(record, maps, lang = getLang()) {
+  const divLabels = divisionLabelsMap(lang);
   return `
     <div class="form-grid">
-      <div class="field"><label for="mMap">调查对象 *</label><select id="mMap" name="map_id" required>${maneMapChoices(maps, record.map_id)}</select></div>
-      <div class="field"><label for="mDiv">塑造分组 *</label><select id="mDiv" name="division">${optionsHtml(Object.entries(DIVISIONS), record.division || 'zero')}</select></div>
+      <div class="field"><label for="mMap">${esc(t('fieldBoss', {}, lang))} *</label><select id="mMap" name="map_id" required>${maneMapChoices(maps, record.map_id, lang)}</select></div>
+      <div class="field"><label for="mDiv">${esc(t('fieldDivision', {}, lang))} *</label><select id="mDiv" name="division">${optionsHtml(Object.entries(divLabels), record.division || 'zero')}</select></div>
     </div>
     <div class="form-grid">
-      <div class="field"><label for="mName">玩家昵称 *</label><input id="mName" name="display_name" required minlength="2" maxlength="32" value="${esc(record.display_name || '')}" /></div>
-      <div class="field"><label for="mScore">结算调查积分 *</label><input id="mScore" name="score" required inputmode="numeric" placeholder="例如 30635308" value="${esc(record.score ?? '')}" /></div>
+      <div class="field"><label for="mName">${esc(t('fieldPlayerName', {}, lang))} *</label><input id="mName" name="display_name" required minlength="2" maxlength="32" value="${esc(record.display_name || '')}" /></div>
+      <div class="field"><label for="mScore">${esc(t('fieldScore', {}, lang))} *</label><input id="mScore" name="score" required inputmode="numeric" placeholder="${esc(L('e.g. 30635308', '例如 30635308', lang))}" value="${esc(record.score ?? '')}" /></div>
     </div>
-    ${renderTeamBuilderFieldHtml()}
-    <div class="field"><label for="mLink">相关链接（选填）</label><input id="mLink" name="related_url" type="url" maxlength="2048" placeholder="https://" value="${esc(record.related_url || '')}" /></div>`;
+    ${renderTeamBuilderFieldHtml(lang)}
+    <div class="field"><label for="mLink">${esc(t('fieldRelatedUrl', {}, lang))}</label><input id="mLink" name="related_url" type="url" maxlength="2048" placeholder="https://" value="${esc(record.related_url || '')}" /></div>`;
 }
 
 function readManeFields(fd, { forEdit = false } = {}) {
+  const lang = getLang();
   const scoreText = String(fd.get('score') ?? '').trim().replace(/[,，]/g, '');
   const score = Number(scoreText);
   const display_name = String(fd.get('display_name') ?? '').trim();
   const division = String(fd.get('division') ?? '');
 
-  if (!Object.hasOwn(DIVISIONS, division)) throw new Error('请选择全 0 塑造或全满塑造。');
-  if (display_name.length < 2 || display_name.length > 32) throw new Error('请填写 2–32 字的玩家昵称。');
+  if (!DIVISION_KEYS.includes(division)) throw new Error(L('Please choose All P0 or Max Portray.', '请选择全 0 塑造或全满塑造。', lang));
+  if (display_name.length < 2 || display_name.length > 32) throw new Error(t('errPlayerRequired', {}, lang));
   if (!/^\d+$/.test(scoreText) || !Number.isSafeInteger(score) || score < 1) {
-    throw new Error('请输入完整的正整数调查积分。');
+    throw new Error(t('errScoreInvalid', {}, lang));
   }
   const built = readTeamBuilderSubmission();
   const res = {
@@ -3713,36 +5805,66 @@ function bindManeScreenshot(form, maps) {
   let undoPrefill = [];
   mapField.addEventListener('change', () => { mapEdited = true; });
   proof.addEventListener('change', async () => {
+    const lang = getLang();
     const current = ++request;
+    form._preparedProof = null;
+    form._preparedProofPromise = null;
     undoPrefill.reverse().forEach((undo) => undo());
     undoPrefill = [];
     refreshBuildSlotsGrid();
 
     const file = proof.files[0];
-    const outcome = await runScreenshotSelection({
-      form,
-      file,
-      preview,
-      note,
-      analyzingLabel: '识别结算截图',
-      recognizeFn: async (f) => {
-        const { recognizeManeScreenshot } = await import('./mane-screenshot.js?v=20261127-ocr-fix');
-        return recognizeManeScreenshot(f);
+    clearUploadPreview(preview);
+    if (!file || !file.size) {
+      note.textContent = '';
+      return;
+    }
+    const mime = resolveProofMime(file);
+    if (!mime) {
+      note.textContent = t('errProofType', {}, lang);
+      return;
+    }
+    if (file.size > MAX_PROOF_RAW_BYTES) {
+      note.textContent = L('Screenshot file exceeds 30 MB limit. Please trim or resize it first.', '截图文件超过 30 MB 上限，请先裁剪或压缩后再上传。', lang);
+      return;
+    }
+    renderUploadPreview(preview, file);
+    note.textContent = file.size > MAX_PROOF_UPLOAD_BYTES
+      ? L('Screenshot > 5 MB: compressing for upload and analyzing…', '截图超过 5 MB，正在自动压缩并识别结算截图…', lang)
+      : L('Analyzing result screenshot…', '正在识别结算截图…', lang);
+
+    const prepPromise = prepareProofForUpload(file, lang);
+    form._preparedProofPromise = { sourceFile: file, promise: prepPromise };
+    const [prepOutcome, ocrOutcome] = await Promise.allSettled([prepPromise, recognizeManeScreenshot(file)]);
+    if (!form.isConnected || request !== current) return;
+
+    if (prepOutcome.status === 'fulfilled') {
+      form._preparedProof = { sourceFile: file, ...prepOutcome.value };
+      if (prepOutcome.value.compressed) {
+        updateUploadPreviewMeta(
+          preview,
+          file,
+          L(`Auto-compressed to ${formatProofBytes(prepOutcome.value.finalSize)}`, `已自动压缩至 ${formatProofBytes(prepOutcome.value.finalSize)}`, lang)
+        );
       }
-    });
-    if (!outcome || !form.isConnected || request !== current) return;
-
-    const { ok, compSuffix } = applyScreenshotPrepOutcome(form, preview, note, file, outcome.prepOutcome);
-    if (!ok) return;
-
-    if (outcome.ocrOutcome.status === 'rejected') {
-      note.textContent = `暂时无法识别这张截图，请手动填写。${compSuffix}`;
+    } else {
+      clearUploadPreview(preview);
+      note.textContent = prepOutcome.reason?.message || t('errProofSize', {}, lang);
       return;
     }
 
-    const result = outcome.ocrOutcome.value;
+    const compSuffix = form._preparedProof?.compressed
+      ? L(` · Auto-compressed to ${formatProofBytes(form._preparedProof.finalSize)}`, ` · 已自动压缩至 ${formatProofBytes(form._preparedProof.finalSize)}`, lang)
+      : '';
+
+    if (ocrOutcome.status === 'rejected') {
+      note.textContent = L('Unable to parse this screenshot; please fill in manually.', '暂时无法识别这张截图，请手动填写。', lang) + compSuffix;
+      return;
+    }
+
+    const result = ocrOutcome.value;
     if (!result) {
-      note.textContent = `这张图的结算版式或关卡未识别，请手动填写。${compSuffix}`;
+      note.textContent = L('Could not auto-detect this layout. Please fill in fields manually.', '这张图的结算版式或关卡未识别，请手动填写。', lang) + compSuffix;
       return;
     }
 
@@ -3783,42 +5905,56 @@ function bindManeScreenshot(form, maps) {
     refreshBuildSlotsGrid();
     const identifiedSlots = result.slots.filter((slot) => slot.character).length;
     const identifiedPsychubes = result.slots.filter((slot) => slot.psychube).length;
-    const detectedBoss = result.mapName || '首领待手选';
-    note.textContent = `识别结果：${detectedBoss} · ${result.score ? Number(result.score).toLocaleString('zh-CN') + ' 分' : '积分待确认'} · ${identifiedSlots} 个角色 / ${identifiedPsychubes} 个心相。请核对表单，补填其余信息后提交。${compSuffix}`;
+    const detectedBoss = result.mapName
+      ? displayBossName(result.mapName, lang)
+      : L('Boss TBD (select manually)', '首领待手选', lang);
+    const arcWord = identifiedSlots === 1 ? 'arcanist' : 'arcanists';
+    const psyWord = identifiedPsychubes === 1 ? 'psychube' : 'psychubes';
+    note.textContent = L(
+      `Detected: ${detectedBoss} · ${result.score ? formatScore(result.score, lang) : 'Score TBD'} · ${identifiedSlots} ${arcWord} / ${identifiedPsychubes} ${psyWord}. Verify and mark Main DPS.`,
+      `识别结果：${detectedBoss} · ${result.score ? formatScore(result.score, lang) + ' 分' : '积分待确认'} · ${identifiedSlots} 个角色 / ${identifiedPsychubes} 个心相。请核对表单，补填其余信息后提交。`,
+      lang
+    ) + compSuffix;
   });
 }
 
 function openManeSubmitModal() {
+  const lang = getLang();
   const maps = state.maneMaps.filter(isMapOpen);
-  if (!state.connected || !maps.length) return toast('当前暂无开放投稿的调查对象。');
+  if (!state.connected || !maps.length) return toast(t('bossNotOpenYet', {}, lang));
   let nick = state.profile?.display_name || '';
   try { nick = nick || localStorage.getItem('mane-nickname') || ''; } catch {}
   const draft = loadSubmitDraft('mane');
   if (draft) restoreModalBuildFromDraft(draft);
   else resetModalBuildState();
 
+  const isOffline = state.dataSource === 'offline';
   const initialMapId = (draft?.map_id && maps.some((m) => m.id === draft.map_id)) ? draft.map_id : state.maneMapId;
-  const initialDiv = (draft?.division && Object.hasOwn(DIVISIONS, draft.division)) ? draft.division : state.maneDivision;
+  const initialDiv = (draft?.division && DIVISION_KEYS.includes(draft.division)) ? draft.division : state.maneDivision;
   const initialNick = draft?.display_name || nick;
   const draftBanner = draft
-    ? `<div class="draft-restore-bar" id="submitDraftBar"><span>✦ 已自动恢复上次未提交草稿（请重新选择结算截图）</span><button type="button" class="text-link-btn" data-clear-draft="mane">清空草稿</button></div>`
+    ? `<div class="draft-restore-bar" id="submitDraftBar"><span>✦ ${esc(t('draftRestored', {}, lang))}</span><button type="button" class="text-link-btn" data-clear-draft="mane">${esc(t('clearDraft', {}, lang))}</button></div>`
     : '';
+  const offlineBanner = isOffline
+    ? `<div class="draft-restore-bar" style="border-left-color:var(--local-teal);border-color:rgba(140,211,200,0.45);background:rgba(68,148,138,0.16)"><span>✦ ${esc(t('offlineSubmitNote', {}, lang))}</span></div>`
+    : '';
+  const globalWelcome = renderGlobalServerNoticeHtml('mane-welcome', lang);
 
   openModal(`
     <div class="modal-eyebrow">MANE’S BULLETIN · SUBMIT</div>
-    <h2>投稿鬃毛邮报成绩</h2>
+    <h2>${esc(t('submitManeTitle', {}, lang))}</h2>
     <div class="modal-subtitle">
-      <span class="resonance-tag">✦ 已支持图像识别</span>
-      <small class="field-hint" style="display:block;margin-top:6px">
-        选择结算截图后，可自动预填 4.1 三张新图的调查对象和积分，以及部分角色和心相。请核对结果，手动补填未识别项，并选择塑造、勾选主 C（支持共同主 C）。共鸣码选填。
-      </small>
+      <span class="resonance-tag">✦ ${esc(L('Screenshot OCR Ready', '已支持图像识别', lang))}</span>
+      <small class="field-hint" style="display:block;margin-top:6px">${esc(t('submitManeSub', {}, lang))}</small>
     </div>
+    ${globalWelcome}
+    ${offlineBanner}
     ${draftBanner}
     <form id="maneSubmitForm">
       <div class="field">
-        <label for="mProof">结算截图 *</label>
-        <input id="mProof" name="proof" type="file" accept="image/png,image/jpeg,image/webp" required />
-        <span class="field-hint">支持 PNG / JPG / WebP，最大 5 MB（超过 5 MB 时将自动压缩上传）。截图仅本人及审核管理员可见。</span>
+        <label for="mProof">${esc(t('fieldProof', {}, lang))}${isOffline ? ` (${esc(t('slotOptional', {}, lang))})` : ' *'}</label>
+        <input id="mProof" name="proof" type="file" accept="image/png,image/jpeg,image/webp" ${isOffline ? '' : 'required'} />
+        <span class="field-hint">${esc(isOffline ? L('Offline Sandbox Mode: screenshot optional; saved locally in your browser. Uploading one still runs OCR preview.', '离线沙盒模式：截图选填，投稿保存在本机浏览器中；上传截图仍可体验自动识别。', lang) : t('fieldProofHint', {}, lang))}</span>
         <span class="field-hint" id="mScreenshotStatus" role="status"></span>
         <div id="mProofPreview" class="proof-upload-preview" hidden></div>
       </div>
@@ -3828,12 +5964,13 @@ function openManeSubmitModal() {
         display_name: initialNick,
         score: draft?.score || '',
         related_url: draft?.related_url || ''
-      }, maps)}
-      ${contactField}
+      }, maps, lang)}
+      ${contactFieldHtml(lang)}
+      <p class="submit-portray-note">✦ ${esc(t('submitPortrayLimitNote', {}, lang))}</p>
       <div class="form-actions">
-        <button type="button" class="ghost-btn" id="clearDraftBtn" data-clear-draft="mane" ${draft ? '' : 'hidden'}>清空草稿</button>
-        <button type="button" class="outline-btn" data-action="close-modal">取消</button>
-        <button type="submit" class="copper-btn">提交审核 →</button>
+        <button type="button" class="ghost-btn" id="clearDraftBtn" data-clear-draft="mane" ${draft ? '' : 'hidden'}>${esc(t('clearDraft', {}, lang))}</button>
+        <button type="button" class="outline-btn" data-action="close-modal">${esc(t('btnCancel', {}, lang))}</button>
+        <button type="submit" class="copper-btn">${esc(t('btnSubmitNow', {}, lang))} →</button>
       </div>
     </form>`, true);
   const form = $('#maneSubmitForm');
@@ -3844,13 +5981,73 @@ function openManeSubmitModal() {
 }
 
 async function handleManeSubmit(form) {
+  const lang = getLang();
   const fd = new FormData(form);
   const record = readManeFields(fd);
   const proof = fd.get('proof');
-  const prepared = await getPreparedProofForForm(form, proof);
+  const hasFile = Boolean(proof && proof.size > 0);
+  let prepared = null;
+  if (hasFile) {
+    if (form._preparedProof?.sourceFile === proof) {
+      prepared = form._preparedProof;
+    } else if (form._preparedProofPromise?.sourceFile === proof) {
+      prepared = { sourceFile: proof, ...(await form._preparedProofPromise.promise) };
+      form._preparedProof = prepared;
+    } else {
+      prepared = { sourceFile: proof, ...(await prepareProofForUpload(proof, lang)) };
+      form._preparedProof = prepared;
+    }
+  }
+
+  if (state.dataSource === 'offline') {
+    const nowIso = new Date().toISOString();
+    const localId = `local-${uid()}`;
+    const entry = {
+      id: localId,
+      player_id: 'local-sandbox',
+      map_id: record.map_id,
+      division: record.division,
+      display_name: record.display_name,
+      team: record.team,
+      carry: record.carry,
+      score: record.score,
+      related_url: record.related_url,
+      team_psychubes: record.team_psychubes || null,
+      team_resonance_codes: record.team_resonance_codes || null,
+      status: 'approved',
+      isLocal: true,
+      created_at: nowIso,
+      approved_at: nowIso
+    };
+    const store = loadOfflineSubmissions();
+    store.mane.unshift(entry);
+    saveOfflineSubmissions(store);
+    try { localStorage.setItem('mane-nickname', record.display_name); } catch {}
+    clearSubmitDraft('mane');
+    hydrateFromOfflineSnapshot();
+
+    const submittedMap = state.maneMaps.find((m) => m.id === record.map_id);
+    state.mode = 'mane';
+    state.manePage = 'scores';
+    if (submittedMap) state.maneSection = submittedMap.section;
+    state.maneMapId = record.map_id;
+    state.maneDivision = record.division;
+    state.maneCarry = '';
+    state.maneAfflatus = '';
+    state.maneQuery = '';
+    const pid = `mane-${localId}`;
+    state.highlightRecordId = pid;
+    pendingScrollRecordId = pid;
+    closeModal();
+    render();
+    toast(t('offlineSubmitSuccess', {}, lang));
+    return;
+  }
+
+  if (!hasFile || !prepared) throw new Error(t('errProofRequired', {}, lang));
 
   const session = state.session || (await checked(sb.auth.signInAnonymously())).session;
-  if (!session) throw new Error('建立投稿会话失败，请重试。');
+  if (!session) throw new Error(L('Could not start submission session. Please retry.', '建立投稿会话失败，请重试。', lang));
   const player_id = session.user.id;
   const path = `${player_id}/${uid()}.${MIME_TO_EXT[prepared.mime]}`;
   const bucket = sb.storage.from('mane-proofs');
@@ -3863,7 +6060,7 @@ async function handleManeSubmit(form) {
   } catch (err) {
     await bucket.remove([path]);
     if (isMissingBuildColumnError(err)) {
-      throw new Error('线上数据库尚未添加心相/共鸣码存储列：请联系站长运行配套迁移 SQL，或暂时清空心相与共鸣码后再提交。');
+      throw new Error(L('Live database has not enabled Psychube/Resonance columns yet. Clear builds or ask an admin to run the migration.', '线上数据库尚未添加心相/共鸣码存储列：请联系站长运行配套迁移 SQL，或暂时清空心相与共鸣码后再提交。', lang));
     }
     throw err;
   }
@@ -3872,20 +6069,18 @@ async function handleManeSubmit(form) {
   try { localStorage.setItem('mane-nickname', record.display_name); } catch {}
   clearSubmitDraft('mane');
   closeModal();
-  toast('已提交，可在「我的投稿」查看审核进度。');
+  toast(t('toastSubmitted', {}, lang));
 }
 
-/* 焦点闪回投稿流程（完整兼容 profiles + proofs + submissions） */
-const resonanceBadge = '<span class="resonance-tag">✦ 全0塑 · 共鸣10</span>';
-function resonanceChoice(group, isChecked = false) {
+function resonanceChoice(group, isChecked = false, lang = getLang()) {
   return `<label class="resonance-choice"${group === 'zero' ? '' : ' hidden'}>
     <input name="resonanceTen" type="checkbox"${group === 'zero' ? '' : ' disabled'}${isChecked && group === 'zero' ? ' checked' : ''}>
-    全队 0 塑造、共鸣 10</label>`;
+    ${esc(t('fieldRes10Check', {}, lang))}</label>`;
 }
 
-function fbStageOptionsHtml(versionId) {
+function fbStageOptionsHtml(versionId, lang = getLang()) {
   return standardStages(versionId)
-    .map((s) => `<option value="${esc(s.id)}"${s.id === state.fbStageId ? ' selected' : ''}>${esc(s.name)}</option>`)
+    .map((s) => `<option value="${esc(s.id)}"${s.id === state.fbStageId ? ' selected' : ''}>${esc(localizeStageName(s, lang))}</option>`)
     .join('');
 }
 
@@ -3908,35 +6103,65 @@ function bindFlashbackScreenshot(form) {
   rounds.addEventListener('change', () => { roundsEdited = true; });
 
   proof.addEventListener('change', async () => {
+    const lang = getLang();
     const current = ++request;
+    form._preparedProof = null;
+    form._preparedProofPromise = null;
     undoPrefill.reverse().forEach((undo) => undo());
     undoPrefill = [];
     refreshBuildSlotsGrid();
     const file = proof.files[0];
-    const outcome = await runScreenshotSelection({
-      form,
-      file,
-      preview,
-      note,
-      analyzingLabel: '识别通关截图',
-      recognizeFn: async (f) => {
-        const { recognizeFlashbackScreenshot } = await import('./flashback-screenshot.js?v=20261127-ocr-fix');
-        return recognizeFlashbackScreenshot(f);
+    clearUploadPreview(preview);
+    if (!file?.size) {
+      note.textContent = '';
+      return;
+    }
+    const mime = resolveProofMime(file);
+    if (!mime) {
+      note.textContent = t('errProofType', {}, lang);
+      return;
+    }
+    if (file.size > MAX_PROOF_RAW_BYTES) {
+      note.textContent = L('Screenshot file exceeds 30 MB limit. Please trim or resize it first.', '截图文件超过 30 MB 上限，请先裁剪或压缩后再上传。', lang);
+      return;
+    }
+    renderUploadPreview(preview, file);
+    note.textContent = file.size > MAX_PROOF_UPLOAD_BYTES
+      ? L('Screenshot > 5 MB: compressing for upload and analyzing…', '截图超过 5 MB，正在自动压缩并识别通关截图…', lang)
+      : L('Analyzing clear screenshot…', '正在识别通关截图…', lang);
+
+    const prepPromise = prepareProofForUpload(file, lang);
+    form._preparedProofPromise = { sourceFile: file, promise: prepPromise };
+    const [prepOutcome, ocrOutcome] = await Promise.allSettled([prepPromise, recognizeFlashbackScreenshot(file)]);
+    if (!form.isConnected || current !== request) return;
+
+    if (prepOutcome.status === 'fulfilled') {
+      form._preparedProof = { sourceFile: file, ...prepOutcome.value };
+      if (prepOutcome.value.compressed) {
+        updateUploadPreviewMeta(
+          preview,
+          file,
+          L(`Auto-compressed to ${formatProofBytes(prepOutcome.value.finalSize)}`, `已自动压缩至 ${formatProofBytes(prepOutcome.value.finalSize)}`, lang)
+        );
       }
-    });
-    if (!outcome || !form.isConnected || current !== request) return;
-
-    const { ok, compSuffix } = applyScreenshotPrepOutcome(form, preview, note, file, outcome.prepOutcome);
-    if (!ok) return;
-
-    if (outcome.ocrOutcome.status === 'rejected') {
-      note.textContent = `暂时无法识别这张截图，请手动填写。${compSuffix}`;
+    } else {
+      clearUploadPreview(preview);
+      note.textContent = prepOutcome.reason?.message || t('errProofSize', {}, lang);
       return;
     }
 
-    const result = outcome.ocrOutcome.value;
+    const compSuffix = form._preparedProof?.compressed
+      ? L(` · Auto-compressed to ${formatProofBytes(form._preparedProof.finalSize)}`, ` · 已自动压缩至 ${formatProofBytes(form._preparedProof.finalSize)}`, lang)
+      : '';
+
+    if (ocrOutcome.status === 'rejected') {
+      note.textContent = L('Unable to parse this screenshot; please fill in manually.', '暂时无法识别这张截图，请手动填写。', lang) + compSuffix;
+      return;
+    }
+
+    const result = ocrOutcome.value;
     if (!result) {
-      note.textContent = `暂未识别这张图的通关画面，请手动填写。${compSuffix}`;
+      note.textContent = L('Could not auto-detect this clear screen. Please fill in manually.', '暂未识别这张图的通关画面，请手动填写。', lang) + compSuffix;
       return;
     }
 
@@ -3988,86 +6213,106 @@ function bindFlashbackScreenshot(form) {
     }
     if (filledChars || filledPsychubes) refreshBuildSlotsGrid();
     else saveSubmitDraftFromForm(form);
-    const stageLabel = detectedStage ? `第${detectedStage.stage_no}关` : '关卡待确认';
-    const roundLabel = result.rounds === null ? '回合待确认' : `${result.rounds} 回合`;
-    note.textContent = `识别结果：${stageLabel} · ${roundLabel}。已预填 ${filledChars} 个角色、${filledPsychubes} 个心相，请核对并补填其余信息。${compSuffix}`;
+    const stageLabel = detectedStage ? localizeStageName(detectedStage, lang) : L('Stage TBD', '关卡待确认', lang);
+    const roundLabel = result.rounds === null ? L('Rounds TBD', '回合待确认', lang) : formatRounds(result.rounds, lang);
+    const arcWord = filledChars === 1 ? 'arcanist' : 'arcanists';
+    const psyWord = filledPsychubes === 1 ? 'psychube' : 'psychubes';
+    note.textContent = L(
+      `Detected: ${stageLabel} · ${roundLabel} · ${filledChars} ${arcWord} / ${filledPsychubes} ${psyWord}.`,
+      `识别结果：${stageLabel} · ${roundLabel}。已预填 ${filledChars} 个角色、${filledPsychubes} 个心相，请核对并补填其余信息。`,
+      lang
+    ) + compSuffix;
   });
 }
 
 function openFbSubmitModal() {
+  const lang = getLang();
   if (!state.connected || !state.fbStages.length || startingGuest) return;
-  if (!state.user) {
+  const isOffline = state.dataSource === 'offline';
+
+  if (!isOffline && !state.user) {
     openModal(`
-      <div class="modal-eyebrow">GUEST PROFILE · 访客投稿登记</div>
-      <h2>设置公开展示昵称</h2>
-      <p class="modal-subtitle">昵称将公开显示于焦点闪回榜单与荣誉殿堂，同一浏览器会保留您的投稿身份。</p>
+      <div class="modal-eyebrow">GUEST PROFILE</div>
+      <h2>${esc(L('Set Public Timekeeper Name', '设置公开展示昵称', lang))}</h2>
+      <p class="modal-subtitle">${esc(L('Your name will appear publicly on Focused Flashback boards and Hall of Fame.', '昵称将公开显示于焦点闪回榜单与荣誉殿堂，同一浏览器会保留您的投稿身份。', lang))}</p>
       <form id="fbGuestForm">
         <div class="field">
-          <label for="fbGuestName">展示昵称 *</label>
+          <label for="fbGuestName">${esc(t('fieldPlayerName', {}, lang))} *</label>
           <input id="fbGuestName" name="name" required minlength="2" maxlength="24" autocomplete="nickname" />
         </div>
         <div class="form-actions">
-          <button type="button" class="outline-btn" data-action="close-modal">取消</button>
-          <button type="submit" class="copper-btn">继续投稿 →</button>
+          <button type="button" class="outline-btn" data-action="close-modal">${esc(t('btnCancel', {}, lang))}</button>
+          <button type="submit" class="copper-btn">${esc(L('Continue →', '继续投稿 →', lang))}</button>
         </div>
       </form>`);
     return;
   }
-  if (!state.profile) {
+  if (!isOffline && !state.profile) {
     openProfileModal(true);
     return;
   }
+
   const draft = loadSubmitDraft('flashback');
   if (draft) restoreModalBuildFromDraft(draft);
   else resetModalBuildState();
 
+  let savedNick = state.profile?.display_name || '';
+  try { savedNick = savedNick || localStorage.getItem('mane-nickname') || ''; } catch {}
+  const initialNick = draft?.nickname || savedNick;
   const initialVerId = (draft?.version && state.fbVersions.some((v) => v.id === draft.version)) ? draft.version : state.fbVersionId;
   const verStages = standardStages(initialVerId);
   const initialStageId = (draft?.stage && verStages.some((s) => s.id === draft.stage)) ? draft.stage : (verStages.some((s) => s.id === state.fbStageId) ? state.fbStageId : (verStages[0]?.id || ''));
-  const initialGroup = (draft?.group && Object.hasOwn(DIVISIONS, draft.group)) ? draft.group : state.fbGroup;
+  const initialGroup = (draft?.group && DIVISION_KEYS.includes(draft.group)) ? draft.group : state.fbGroup;
   const initialRounds = (draft && /^[0-6]$/.test(String(draft.rounds ?? ''))) ? String(draft.rounds) : '';
+  const divLabels = divisionLabelsMap(lang);
+
   const draftBanner = draft
-    ? `<div class="draft-restore-bar" id="submitDraftBar"><span>✦ 已自动恢复上次未提交草稿（请重新选择通关截图）</span><button type="button" class="text-link-btn" data-clear-draft="flashback">清空草稿</button></div>`
+    ? `<div class="draft-restore-bar" id="submitDraftBar"><span>✦ ${esc(t('draftRestored', {}, lang))}</span><button type="button" class="text-link-btn" data-clear-draft="flashback">${esc(t('clearDraft', {}, lang))}</button></div>`
     : '';
+  const offlineBanner = isOffline
+    ? `<div class="draft-restore-bar" style="border-left-color:var(--local-teal);border-color:rgba(140,211,200,0.45);background:rgba(68,148,138,0.16)"><span>✦ ${esc(t('offlineSubmitNote', {}, lang))}</span></div>`
+    : '';
+  const globalFbSubmitNotice = renderGlobalServerNoticeHtml('fb-submit', lang);
 
   openModal(`
     <div class="modal-eyebrow">FLASHBACK ARCHIVE · SUBMIT</div>
-    <h2>提交焦点闪回成绩</h2>
+    <h2>${esc(t('submitFbTitle', {}, lang))}</h2>
     <div class="modal-subtitle">
-      <span class="resonance-tag">✦ 已支持图像识别</span>
-      <small class="field-hint" style="display:block;margin-top:6px">
-        选择通关截图可预填识别到的关卡、回合和部分角色、心相。仅收录 0–6 回合有效成绩，请核对后补填，确认期次和塑造，并勾选主 C。
-      </small>
+      <span class="resonance-tag">✦ ${esc(L('Screenshot OCR Ready', '已支持图像识别', lang))}</span>
+      <small class="field-hint" style="display:block;margin-top:6px">${esc(t('submitFbSub', {}, lang))}</small>
     </div>
+    ${globalFbSubmitNotice}
+    ${offlineBanner}
     ${draftBanner}
     <form id="fbSubmitForm">
       <div class="field">
-        <label for="fbFormProof">通关截图 *</label>
-        <input id="fbFormProof" name="proof" type="file" accept="image/png,image/jpeg,image/webp" required />
-        <span class="field-hint">PNG / JPG / WebP，最大 5 MB（超过 5 MB 时将自动压缩上传），仅本人及管理员可见。</span>
+        <label for="fbFormProof">${esc(t('fieldProof', {}, lang))}${isOffline ? ` (${esc(t('slotOptional', {}, lang))})` : ' *'}</label>
+        <input id="fbFormProof" name="proof" type="file" accept="image/png,image/jpeg,image/webp" ${isOffline ? '' : 'required'} />
+        <span class="field-hint">${esc(isOffline ? L('Offline Sandbox Mode: screenshot optional; saved locally in your browser. Uploading one still runs OCR preview.', '离线沙盒模式：截图选填，投稿保存在本机浏览器中；上传截图仍可体验自动识别。', lang) : t('fieldProofHint', {}, lang))}</span>
         <span class="field-hint" id="fbScreenshotStatus" role="status"></span>
         <div id="fbProofPreview" class="proof-upload-preview" hidden></div>
       </div>
       <div class="form-grid">
-        <div class="field"><label for="fbNick">玩家昵称 *</label><input id="fbNick" name="nickname" readonly value="${esc(state.profile.display_name)}" /></div>
-        <div class="field"><label for="fbFormVersion">游戏版本 *</label><select id="fbFormVersion" name="version">${optionsHtml(state.fbVersions.map((v) => [v.id, v.label]), initialVerId)}</select></div>
+        <div class="field"><label for="fbNick">${esc(t('fieldPlayerName', {}, lang))} *</label><input id="fbNick" name="nickname" ${isOffline ? 'required minlength="2" maxlength="24"' : 'readonly'} value="${esc(initialNick)}" /></div>
+        <div class="field"><label for="fbFormVersion">${esc(t('fieldVersion', {}, lang))} *</label><select id="fbFormVersion" name="version">${optionsHtml(state.fbVersions.map((v) => [v.id, localizeVersionLabel(v, lang)]), initialVerId)}</select></div>
       </div>
       <div class="form-grid">
-        <div class="field"><label for="fbFormStage">挑战关卡 *</label><select id="fbFormStage" name="stage">${optionsHtml(verStages.map((s) => [s.id, s.name]), initialStageId)}</select></div>
-        <div class="field"><label for="fbFormGroup">塑造分组 *</label><select id="fbFormGroup" name="group">${optionsHtml(Object.entries(DIVISIONS), initialGroup)}</select></div>
+        <div class="field"><label for="fbFormStage">${esc(t('fieldStage', {}, lang))} *</label><select id="fbFormStage" name="stage">${optionsHtml(verStages.map((s) => [s.id, localizeStageName(s, lang)]), initialStageId)}</select></div>
+        <div class="field"><label for="fbFormGroup">${esc(t('fieldDivision', {}, lang))} *</label><select id="fbFormGroup" name="group">${optionsHtml(Object.entries(divLabels), initialGroup)}</select></div>
       </div>
-      <div class="field"><label for="fbFormRounds">通关回合 *</label><select id="fbFormRounds" name="rounds" required><option value="">请选择回合数</option>${Array.from({ length: 7 }, (_, n) => `<option value="${n}"${initialRounds === String(n) ? ' selected' : ''}>${n} 回合</option>`).join('')}</select></div>
-      ${resonanceChoice(initialGroup, Boolean(draft?.resonanceTen))}
-      ${renderTeamBuilderFieldHtml()}
+      <div class="field"><label for="fbFormRounds">${esc(t('fieldRounds', {}, lang))} *</label><select id="fbFormRounds" name="rounds" required><option value="">${esc(L('Select rounds (0–6)', '请选择回合数', lang))}</option>${Array.from({ length: 7 }, (_, n) => `<option value="${n}"${initialRounds === String(n) ? ' selected' : ''}>${esc(t('roundsFull', { n }, lang))}</option>`).join('')}</select></div>
+      ${resonanceChoice(initialGroup, Boolean(draft?.resonanceTen), lang)}
+      ${renderTeamBuilderFieldHtml(lang)}
       <div class="field">
-        <label for="fbFormLink">相关链接（选填）</label>
+        <label for="fbFormLink">${esc(t('fieldRelatedUrl', {}, lang))}</label>
         <input id="fbFormLink" name="relatedUrl" type="url" maxlength="2048" placeholder="https://" value="${esc(draft?.relatedUrl || '')}" />
       </div>
-      ${contactField}
+      ${contactFieldHtml(lang)}
+      <p class="submit-portray-note">✦ ${esc(t('submitPortrayLimitNote', {}, lang))}</p>
       <div class="form-actions">
-        <button type="button" class="ghost-btn" id="clearDraftBtn" data-clear-draft="flashback" ${draft ? '' : 'hidden'}>清空草稿</button>
-        <button type="button" class="outline-btn" data-action="close-modal">取消</button>
-        <button type="submit" class="copper-btn">确认提交 →</button>
+        <button type="button" class="ghost-btn" id="clearDraftBtn" data-clear-draft="flashback" ${draft ? '' : 'hidden'}>${esc(t('clearDraft', {}, lang))}</button>
+        <button type="button" class="outline-btn" data-action="close-modal">${esc(t('btnCancel', {}, lang))}</button>
+        <button type="submit" class="copper-btn">${esc(t('btnSubmitNow', {}, lang))} →</button>
       </div>
     </form>`, true);
   const form = $('#fbSubmitForm');
@@ -4078,24 +6323,93 @@ function openFbSubmitModal() {
 }
 
 async function handleFbSubmit(form) {
+  const lang = getLang();
   const fd = new FormData(form);
   const nickname = String(fd.get('nickname') ?? '').trim();
   const roundValue = String(fd.get('rounds') ?? '');
   const rounds = Number(roundValue);
   const file = fd.get('proof');
+  const hasFile = Boolean(file && file.size > 0);
   const versionId = String(fd.get('version'));
   const stageId = String(fd.get('stage'));
   const group_code = String(fd.get('group'));
 
-  if (nickname.length < 2 || nickname.length > 24) throw new Error('玩家昵称需在 2–24 个字符之间。');
-  if (!/^[0-6]$/.test(roundValue)) throw new Error('请选择 0–6 之间的通关回合数。');
-  const prepared = await getPreparedProofForForm(form, file);
+  if (nickname.length < 2 || nickname.length > 24) throw new Error(t('errPlayerRequired', {}, lang));
+  if (!/^[0-6]$/.test(roundValue)) throw new Error(t('errRoundsInvalid', {}, lang));
   if (!state.fbStages.some((s) => s.id === stageId && s.version_id === versionId)) {
-    throw new Error('所选版本与关卡不匹配。');
+    throw new Error(L('Selected cycle and stage do not match.', '所选版本与关卡不匹配。', lang));
   }
   const built = readTeamBuilderSubmission();
-  validateLineup(built.team);
+  validateLineup(built.team, lang);
   const related_url = parseHttpUrl(fd.get('relatedUrl')) || null;
+
+  let prepared = null;
+  if (hasFile) {
+    if (form._preparedProof?.sourceFile === file) {
+      prepared = form._preparedProof;
+    } else if (form._preparedProofPromise?.sourceFile === file) {
+      prepared = { sourceFile: file, ...(await form._preparedProofPromise.promise) };
+      form._preparedProof = prepared;
+    } else {
+      prepared = { sourceFile: file, ...(await prepareProofForUpload(file, lang)) };
+      form._preparedProof = prepared;
+    }
+  }
+
+  if (state.dataSource === 'offline') {
+    const nowIso = new Date().toISOString();
+    const localId = `local-${uid()}`;
+    const stageObj = state.fbStages.find((s) => s.id === stageId);
+    const verObj = state.fbVersions.find((v) => v.id === versionId);
+    const entry = {
+      id: localId,
+      player_id: `local-player:${normKey(nickname)}`,
+      stage_id: stageId,
+      group_code,
+      team: built.team,
+      team_key: canonicalTeam(built.team),
+      carry_name: built.carry,
+      rounds,
+      created_at: nowIso,
+      display_name: nickname,
+      stage_no: stageObj?.stage_no || 1,
+      stage_name: stageObj?.name || '',
+      version_id: versionId,
+      version_name: verObj?.label || '',
+      related_url,
+      resonance_ten: group_code === 'zero' && fd.has('resonanceTen'),
+      team_psychubes: built.hasPsychubes ? built.psychubes : null,
+      team_resonance_codes: built.hasResonance ? built.resonanceCodes : null,
+      status: 'approved',
+      isLocal: true
+    };
+    const store = loadOfflineSubmissions();
+    store.flashback.unshift(entry);
+    saveOfflineSubmissions(store);
+    try { localStorage.setItem('mane-nickname', nickname); } catch {}
+    clearSubmitDraft('flashback');
+    hydrateFromOfflineSnapshot();
+
+    state.mode = 'flashback';
+    state.fbPage = 'leaderboard';
+    state.fbVersionId = versionId;
+    state.fbStageId = stageId;
+    state.fbGroup = group_code;
+    state.fbResonanceOnly = false;
+    state.fbCarry = '';
+    state.fbAfflatus = '';
+    state.fbQuery = '';
+    const pid = `fb-${localId}`;
+    state.highlightRecordId = pid;
+    pendingScrollRecordId = pid;
+    closeModal();
+    render();
+    toast(t('offlineSubmitSuccess', {}, lang));
+    return;
+  }
+
+  if (!hasFile || !prepared) throw new Error(t('errProofRequired', {}, lang));
+
   const conflicts = await checked(sb.rpc('flashback_existing_lineup', {
     p_stage_id: stageId,
     p_group_code: group_code,
@@ -4104,7 +6418,12 @@ async function handleFbSubmit(form) {
   }));
   if (conflicts?.length) {
     const { matched_team, incumbent_rounds } = conflicts[0];
-    throw new Error(`已有该队伍：${matched_team.join('、')}（${incumbent_rounds} 回合）。请减少回合，或调整阵容。`);
+    const teamText = (matched_team || []).map((n) => displayCharacterName(n, lang)).join(isEn(lang) ? ', ' : '、');
+    throw new Error(L(
+      `This lineup already exists: ${teamText} (${incumbent_rounds}R). Submit fewer rounds or adjust the lineup.`,
+      `已有该队伍：${teamText}（${incumbent_rounds} 回合）。请减少回合，或调整阵容。`,
+      lang
+    ));
   }
 
   const path = `${state.user.id}/${uid()}.${MIME_TO_EXT[prepared.mime]}`;
@@ -4130,99 +6449,150 @@ async function handleFbSubmit(form) {
   } catch (err) {
     await sb.storage.from('proofs').remove([path]);
     if (isMissingBuildColumnError(err)) {
-      throw new Error('线上数据库尚未添加心相/共鸣码存储列：请联系站长运行配套迁移 SQL，或暂时清空心相与共鸣码后再提交。');
+      throw new Error(L('Live database has not enabled Psychube/Resonance columns yet. Clear builds or ask an admin to run the migration.', '线上数据库尚未添加心相/共鸣码存储列：请联系站长运行配套迁移 SQL，或暂时清空心相与共鸣码后再提交。', lang));
     }
     throw err;
   }
   clearSubmitDraft('flashback');
   closeModal();
   await loadAllData();
-  toast('已提交，可在「我的投稿」查看审核进度。');
+  toast(t('toastSubmitted', {}, lang));
 }
 
-/* ==================== 我的投稿进度与管理员审核 ==================== */
+/* ==================== Offline Excel Export ==================== */
+async function exportOfflineExcel() {
+  const lang = getLang();
+  const date = getEffectiveDailyDate();
+  const { division, map } = state.maneDaily;
+  const selectedMaps = map ? state.maneMaps.filter((m) => m.id === map) : state.maneMaps;
+  const dailyRows = filterOfflineDailyRows(state.maneDailyScores, {
+    date,
+    division,
+    mapIds: map ? [map] : []
+  });
+  await exportManeWorkbook({
+    date,
+    divisions: division ? [division] : DIVISION_KEYS,
+    maps: selectedMaps.length ? selectedMaps : state.maneMaps,
+    dailyRows,
+    totals: state.maneTotals,
+    divisionLabels: divisionLabelsMap(lang),
+    sectionLabels: sectionLabelsMap(lang),
+    lang
+  });
+  toast(L('Excel workbook exported.', 'Excel 表格已导出。', lang));
+}
+
+/* ==================== My Submissions & Account / Moderation ==================== */
 function openMySubmissions(mode = state.mode) {
+  const lang = getLang();
   const flashback = mode === 'flashback';
-  openModal(`<div class="moderation-tabs" role="group" aria-label="投稿所属榜单">
-    <button class="outline-btn ${flashback ? '' : 'selected'}" type="button" data-progress-board="mane">鬃毛邮报</button>
-    <button class="outline-btn ${flashback ? 'selected' : ''}" type="button" data-progress-board="flashback">焦点闪回</button>
-  </div><section id="progressPanel"></section><p class="field-hint">使用昵称投稿后，请在原浏览器查看记录。</p>`, true);
+  const isOffline = state.dataSource === 'offline';
+  const localStore = isOffline ? loadOfflineSubmissions() : null;
+  const offlineRows = isOffline ? (flashback ? localStore.flashback : localStore.mane) : null;
+
+  openModal(`<div class="moderation-tabs" role="group" aria-label="${esc(t('modeSwitcherAria', {}, lang))}">
+    <button class="outline-btn ${flashback ? '' : 'selected'}" type="button" data-progress-board="mane">${esc(t('modeMane', {}, lang))}</button>
+    <button class="outline-btn ${flashback ? 'selected' : ''}" type="button" data-progress-board="flashback">${esc(t('modeFlashback', {}, lang))}</button>
+  </div><section id="progressPanel"></section><p class="field-hint">${esc(isOffline ? t('mySubOffline', {}, lang) : L('Guest submissions are linked to this browser session.', '使用昵称投稿后，请在原浏览器查看记录。', lang))}</p>`, true);
+
   mountSubmissionProgress($('#progressPanel'), {
-    client: sb,
-    ownerId: state.user?.id,
+    client: isOffline ? null : sb,
+    ownerId: isOffline ? null : state.user?.id,
     table: flashback ? 'submissions' : 'mane_entries',
     columns: flashback ? 'stage_id,group_code,carry_name,rounds,team,resonance_ten' : 'map_id,division,carry,score,team',
+    offlineRows,
+    onClearOffline: isOffline
+      ? () => {
+          clearOfflineSubmissions(flashback ? 'flashback' : 'mane');
+          hydrateFromOfflineSnapshot();
+          render();
+          toast(t('offlineClearedToast', {}, lang));
+          return [];
+        }
+      : null,
+    lang,
     describe(row) {
+      const who = row.display_name ? `${row.display_name} · ` : '';
       if (!flashback) {
         const map = state.maneMaps.find((item) => item.id === row.map_id);
-        return { title: map?.name || '已隐藏地图', summary: `${DIVISIONS[row.division] || row.division} · 主 C · ${row.carry} · ${formatScore(row.score)} 分` };
+        const bossTitle = map ? displayBossName(map.name, lang) : L('Hidden Boss', '已隐藏地图', lang);
+        return {
+          title: bossTitle,
+          summary: `${who}${localizeDivision(row.division, lang)} · ${t('mainDpsLabel', {}, lang)}: ${displayCarryNames(row.carry, lang)} · ${formatScore(row.score, lang)}`
+        };
       }
       const stage = state.fbStages.find((item) => item.id === row.stage_id);
+      const stageTitle = stage ? localizeStageName(stage, lang) : L('Hidden Stage', '已隐藏关卡', lang);
       return {
-        title: stage?.name || '已隐藏关卡',
-        summary: `${DIVISIONS[row.group_code] || row.group_code}${row.resonance_ten ? ' · 共鸣10' : ''} · 主 C · ${row.carry_name} · ${row.rounds} 回合`
+        title: stageTitle,
+        summary: `${who}${localizeDivision(row.group_code, lang)}${row.resonance_ten ? ` · ${t('res10Badge', {}, lang)}` : ''} · ${t('mainDpsLabel', {}, lang)}: ${displayCarryNames(row.carry_name, lang)} · ${t('roundsFull', { n: row.rounds }, lang)}`
       };
     }
   });
 }
 
-/* ==================== 账号 / 管理员登录与双榜审核后台 ==================== */
 function openLoginModal() {
+  const lang = getLang();
   openModal(`
     <div class="modal-eyebrow">ADMIN AUTHENTICATION</div>
-    <h2>管理员邮箱登录</h2>
-    <p class="modal-subtitle">请使用站长授权的审核邮箱；登录成功后可同时管理鬃毛邮报与焦点闪回两套榜单。</p>
+    <h2>${esc(t('loginTitle', {}, lang))}</h2>
+    <p class="modal-subtitle">${esc(t('loginSub', {}, lang))}</p>
     <form id="adminLoginForm">
       <div class="field">
-        <label for="adminEmail">已授权电子邮箱 *</label>
+        <label for="adminEmail">${esc(t('loginEmail', {}, lang))} *</label>
         <input id="adminEmail" name="email" type="email" required autocomplete="email" />
       </div>
-      <span class="field-hint">收到邮件后，请在同一浏览器内打开一次性登录链接并返回本页。</span>
+      <span class="field-hint">${esc(L('A one-time magic sign-in link will be sent to your authorized moderator email.', '收到邮件后，请在同一浏览器内打开一次性登录链接并返回本页。', lang))}</span>
       <div class="form-actions">
-        <button type="button" class="outline-btn" data-action="close-modal">取消</button>
-        <button type="submit" class="copper-btn">发送登录邮件</button>
+        <button type="button" class="outline-btn" data-action="close-modal">${esc(t('btnCancel', {}, lang))}</button>
+        <button type="submit" class="copper-btn">${esc(t('loginBtn', {}, lang))}</button>
       </div>
     </form>`);
 }
 
 function openProfileModal(forFbSubmit = false) {
+  const lang = getLang();
   openModal(`
     <div class="modal-eyebrow">ACCOUNT &amp; PROFILE</div>
-    <h2>玩家资料与账号</h2>
+    <h2>${esc(t('profileTitle', {}, lang))}</h2>
     <form id="profileForm" data-for-fb="${forFbSubmit}">
       <div class="field">
-        <label for="profileNick">公开展示昵称（焦点闪回）</label>
+        <label for="profileNick">${esc(t('profileDisplayName', {}, lang))}</label>
         <input id="profileNick" name="name" required minlength="2" maxlength="24" value="${esc(state.profile?.display_name || '')}" />
       </div>
       <div class="form-actions">
         ${state.user?.is_anonymous
-          ? '<button type="button" class="outline-btn" data-action="open-login">切换管理员登录</button>'
-          : '<button type="button" class="outline-btn" data-action="logout">退出登录</button>'}
-        ${state.isAdmin ? '<button type="button" class="outline-btn" data-action="open-admin">进入管理后台</button>' : ''}
-        <button type="submit" class="copper-btn">保存昵称</button>
+          ? `<button type="button" class="outline-btn" data-action="open-login">${esc(t('btnAdminLogin', {}, lang))}</button>`
+          : `<button type="button" class="outline-btn" data-action="logout">${esc(t('logoutBtn', {}, lang))}</button>`}
+        ${state.isAdmin ? `<button type="button" class="outline-btn" data-action="open-admin">${esc(t('btnAdmin', {}, lang))}</button>` : ''}
+        <button type="submit" class="copper-btn">${esc(t('profileSave', {}, lang))}</button>
       </div>
     </form>`);
 }
 
-function renderAdminBuildSummaryHtml(row) {
+function renderAdminBuildSummaryHtml(row, lang = getLang()) {
   const { psychubes, resonanceCodes } = extractRecordBuilds(row);
   if (!psychubes.some(Boolean) && !resonanceCodes.some(Boolean)) return '';
   const items = (row.team || []).map((name, i) => {
     const p = psychubes[i] || '';
     const r = resonanceCodes[i] || '';
     if (!p && !r) return '';
-    return `${esc(name)}：${p ? `心相「${esc(p)}」` : ''}${p && r ? ' · ' : ''}${r ? `共鸣码 ${esc(r)}` : ''}`;
+    const cLabel = displayCharacterName(name, lang);
+    const pLabel = p ? displayPsychubeName(p, lang) : '';
+    return `${esc(cLabel)}: ${pLabel ? `${esc(t('buildTagPsy', {}, lang))} [${esc(pLabel)}]` : ''}${pLabel && r ? ' · ' : ''}${r ? `${esc(t('buildTagRes', {}, lang))} ${esc(r)}` : ''}`;
   }).filter(Boolean);
-  return items.length ? `<br/>配装：${items.join(' ｜ ')}` : '';
+  return items.length ? `<br/>${esc(L('Builds', '配装', lang))}: ${items.join(' | ')}` : '';
 }
 
 const adminFilters = {
-  mane: {tab: '', name: '', location: '', division: '', page: 0},
-  flashback: {tab: '', name: '', location: '', division: '', page: 0}
+  mane: { tab: '', name: '', location: '', division: '', page: 0 },
+  flashback: { tab: '', name: '', location: '', division: '', page: 0 }
 };
 const moderationReloads = new WeakMap();
 
 async function renderFilteredAdmin(list, mode, tab, locationLabel, groups, fetchRows, renderRows) {
+  const lang = getLang();
   if (!list?.isConnected) return;
   const filters = adminFilters[mode];
   if (filters.tab !== tab) {
@@ -4232,12 +6602,12 @@ async function renderFilteredAdmin(list, mode, tab, locationLabel, groups, fetch
   if (!groups.some(([, items]) => items.some(([id]) => id === filters.location))) {
     filters.location = '';
   }
-  list.insertAdjacentHTML('beforebegin', moderationFilterFields(filters, locationLabel, groups));
+  list.insertAdjacentHTML('beforebegin', moderationFilterFields(filters, locationLabel, groups, lang));
 
   let request = 0;
   async function load(keepRows = false) {
     const current = ++request;
-    if (!keepRows) list.textContent = '正在读取投稿…';
+    if (!keepRows) list.textContent = t('emptyTitleLoading', {}, lang);
     try {
       const rows = await fetchRows(filters);
       if (!list.isConnected || current !== request) return;
@@ -4246,12 +6616,12 @@ async function renderFilteredAdmin(list, mode, tab, locationLabel, groups, fetch
         return load(keepRows);
       }
       list.innerHTML = renderRows(rows.slice(0, moderationPageSize)) +
-        moderationPager(filters.page, rows.length > moderationPageSize);
+        moderationPager(filters.page, rows.length > moderationPageSize, lang);
     } catch (error) {
-      if (list.isConnected && current === request) list.textContent = `读取失败：${error.message}`;
+      if (list.isConnected && current === request) list.textContent = `${L('Load failed', '读取失败', lang)}: ${error.message}`;
     }
   }
-  moderationReloads.set(list, {tab, load});
+  moderationReloads.set(list, { tab, load });
   bindModerationFilters(list.previousElementSibling, list, filters, load);
   await load();
 }
@@ -4263,7 +6633,6 @@ async function finishReview(dialog, board, tab, message, { changedRankings = fal
     void refreshReviewedBoards();
     return;
   }
-
   const current = moderationReloads.get(dialog.querySelector('#adminList'));
   if (current?.tab === tab) {
     card?.remove();
@@ -4276,6 +6645,7 @@ async function finishReview(dialog, board, tab, message, { changedRankings = fal
 }
 
 async function showReviewProof(button) {
+  const lang = getLang();
   const card = button.closest('.review-card');
   const box = card?.querySelector('.review-proof');
   if (!box) return;
@@ -4288,7 +6658,7 @@ async function showReviewProof(button) {
   const controls = card.querySelectorAll('[data-mane-proof], [data-fb-proof]');
   if ([...controls].some((control) => control.disabled)) return;
   controls.forEach((control) => { control.disabled = true; });
-  status.textContent = original ? '正在读取原图…' : '正在生成截图预览…';
+  status.textContent = original ? L('Loading original image…', '正在读取原图…', lang) : L('Generating preview…', '正在生成截图预览…', lang);
   try {
     let file;
     if (original) {
@@ -4298,28 +6668,30 @@ async function showReviewProof(button) {
       file = await checked(sb.storage.from(bucket).download(row.evidence_path));
     } else {
       file = await checked(sb.functions.invoke('moderation-proof-preview', {
-        body: {board, id}, region: 'ap-northeast-1', timeout: 15000
+        body: { board, id }, region: 'ap-northeast-1', timeout: 15000
       }));
-      if (file instanceof Blob) file = new Blob([file], {type: 'image/jpeg'});
+      if (file instanceof Blob) file = new Blob([file], { type: 'image/jpeg' });
     }
 
     const img = await decodeImageFile(file);
     if (!box.isConnected) return;
-    img.alt = original ? '审核截图原图' : '审核截图预览';
+    img.alt = original ? L('Original proof screenshot', '审核截图原图', lang) : L('Proof preview', '审核截图预览', lang);
     img.className = 'proof-img';
     box.querySelector('.review-proof-image').replaceChildren(img);
     box.dataset.proofSize = size;
-    status.textContent = original ? '正在显示原图。' : '正在显示压缩预览。';
+    status.textContent = original ? L('Showing original image.', '正在显示原图。', lang) : L('Showing compressed preview.', '正在显示压缩预览。', lang);
   } catch {
     if (box.isConnected) {
-      status.textContent = original ? '原图读取失败，截图可能已过期。' : '预览暂不可用，可选择「查看原图」。';
+      status.textContent = original
+        ? L('Failed to load original screenshot.', '原图读取失败，截图可能已过期。', lang)
+        : L('Preview unavailable; try View Original.', '预览暂不可用，可选择「查看原图」。', lang);
     }
   } finally {
     controls.forEach((control) => { control.disabled = false; });
   }
 }
 
-function reviewProofHtml(board, id, hasProof) {
+function reviewProofHtml(board, id, hasProof, lang = getLang()) {
   if (!hasProof) return '';
   const attribute = board === 'mane' ? 'data-mane-proof' : 'data-fb-proof';
   return `
@@ -4328,107 +6700,114 @@ function reviewProofHtml(board, id, hasProof) {
       <div class="review-proof-image"></div>
     </div>
     <div class="review-actions">
-      <button type="button" class="outline-btn" ${attribute}="${esc(id)}">查看截图预览</button>
-      <button type="button" class="text-link-btn" ${attribute}="${esc(id)}" data-proof-size="original">查看原图</button>
+      <button type="button" class="outline-btn" ${attribute}="${esc(id)}">${esc(L('Preview Proof', '查看截图预览', lang))}</button>
+      <button type="button" class="text-link-btn" ${attribute}="${esc(id)}" data-proof-size="original">${esc(L('View Original', '查看原图', lang))}</button>
     </div>`;
 }
 
 function openManeExport(status) {
-  if (!state.isAdmin) return toast('仅管理员可导出成绩。');
+  const lang = getLang();
+  if (!state.isAdmin) return toast(L('Admin access required.', '仅管理员可导出成绩。', lang));
   const groups = new Map();
   for (const map of state.maneMaps) {
-    const group = `${map.edition} · ${MANE_SECTIONS[map.section]}`;
+    const group = `${map.edition} · ${localizeSection(map.section, lang)}`;
     if (!groups.has(group)) groups.set(group, []);
     groups.get(group).push(map);
   }
   openModal(`
     <div class="modal-eyebrow">MANE’S BULLETIN · EXPORT</div>
-    <h2>导出鬃毛邮报成绩</h2>
+    <h2>${esc(t('adminExportExcel', {}, lang))}</h2>
     <form id="maneExportForm">
       <fieldset style="border:1px solid var(--line-hair);margin:0 0 12px;min-width:0">
-        <legend>导出内容</legend>
+        <legend>${esc(L('Sheets', '导出内容', lang))}</legend>
         <div style="display:flex;flex-wrap:wrap;gap:12px">
-          <label><input type="checkbox" name="sheet" value="daily" checked> 每日新分</label>
-          <label><input type="checkbox" name="sheet" value="totals" checked> 主 C 总计</label>
+          <label><input type="checkbox" name="sheet" value="daily" checked> ${esc(t('navDaily', {}, lang))}</label>
+          <label><input type="checkbox" name="sheet" value="totals" checked> ${esc(t('navTotals', {}, lang))}</label>
         </div>
       </fieldset>
       <div class="form-grid">
-        <div class="field"><label for="maneExportDivision">塑造</label>
-          <select id="maneExportDivision" name="division">${optionsHtml([['', '全部塑造'], ...Object.entries(DIVISIONS)], '')}</select>
+        <div class="field"><label for="maneExportDivision">${esc(t('fieldDivision', {}, lang))}</label>
+          <select id="maneExportDivision" name="division">${optionsHtml([['', t('dailyAllDivisions', {}, lang)], ...Object.entries(divisionLabelsMap(lang))], '')}</select>
         </div>
       </div>
       <fieldset style="border:1px solid var(--line-hair);margin:0 0 12px;min-width:0">
-        <legend>关卡（可多选）</legend>
+        <legend>${esc(t('fieldBoss', {}, lang))}</legend>
         <div class="form-actions" style="justify-content:flex-start;margin:6px 0">
-          <button type="button" class="outline-btn" data-mane-export-maps="all">全选</button>
-          <button type="button" class="outline-btn" data-mane-export-maps="none">清空</button>
+          <button type="button" class="outline-btn" data-mane-export-maps="all">${esc(t('afflatusAll', {}, lang))}</button>
+          <button type="button" class="outline-btn" data-mane-export-maps="none">${esc(t('resetFilter', {}, lang))}</button>
         </div>
         <div style="max-height:190px;overflow:auto">
           ${[...groups].map(([group, maps]) => `<div>
             <strong class="field-hint">${esc(group)}</strong>
             ${maps.map((map) => `<label style="display:flex;align-items:center;gap:8px">
-              <input type="checkbox" name="map" value="${esc(map.id)}" checked> ${esc(map.name)}
+              <input type="checkbox" name="map" value="${esc(map.id)}" checked> ${esc(displayBossName(map.name, lang))}
             </label>`).join('')}
           </div>`).join('')}
         </div>
       </fieldset>
-      <p class="field-hint">每日新分导出北京时间当天审核通过的成绩。主 C 总计按分区、版本和塑造分别排名，所选关卡各取最高分。</p>
       <div class="form-actions">
-        <button type="button" class="outline-btn" data-mane-admin="${esc(status)}">返回审核</button>
-        <button type="submit" class="copper-btn">下载 Excel</button>
+        <button type="button" class="outline-btn" data-mane-admin="${esc(status)}">${esc(t('btnCancel', {}, lang))}</button>
+        <button type="submit" class="copper-btn">${esc(t('btnExportExcel', {}, lang))}</button>
       </div>
     </form>`, true);
 }
 
 async function submitManeExport(form) {
-  if (!state.isAdmin) throw new Error('仅管理员可导出成绩。');
+  const lang = getLang();
+  if (!state.isAdmin) throw new Error(L('Admin access required.', '仅管理员可导出成绩。', lang));
   const fields = new FormData(form);
   const sheets = new Set(fields.getAll('sheet'));
   const selected = new Set(fields.getAll('map'));
   const maps = state.maneMaps.filter((map) => selected.has(map.id));
-  if (!sheets.size) throw new Error('请至少选择一种导出内容。');
-  if (!maps.length) throw new Error('请至少选择一个关卡。');
+  if (!sheets.size) throw new Error(L('Select at least one sheet.', '请至少选择一种导出内容。', lang));
+  if (!maps.length) throw new Error(L('Select at least one boss.', '请至少选择一个关卡。', lang));
   const division = fields.get('division');
-  if (division && !Object.hasOwn(DIVISIONS, division)) {
-    throw new Error('筛选条件无效，请重新选择。');
-  }
+  if (division && !DIVISION_KEYS.includes(division)) throw new Error(L('Invalid division.', '筛选条件无效。', lang));
   const date = todayInBeijing();
   const [dailyRows, totals] = await Promise.all([
-    sheets.has('daily') ? loadManeDailyRows({date, division, mapIds: maps.map((map) => map.id)}) : null,
-    sheets.has('totals') ? loadPages('mane_carry_total_leaderboard', ['section','edition','division','carry_key']) : null
+    sheets.has('daily') ? loadManeDailyRows({ date, division, mapIds: maps.map((map) => map.id) }) : null,
+    sheets.has('totals') ? loadPages('mane_carry_total_leaderboard', ['section', 'edition', 'division', 'carry_key']) : null
   ]);
   if (!form.isConnected || !state.isAdmin) return;
   await exportManeWorkbook({
-    date, divisions: division ? [division] : Object.keys(DIVISIONS), maps, dailyRows, totals,
-    divisionLabels: DIVISIONS, sectionLabels: MANE_SECTIONS,
+    date,
+    divisions: division ? [division] : DIVISION_KEYS,
+    maps,
+    dailyRows,
+    totals,
+    divisionLabels: divisionLabelsMap(lang),
+    sectionLabels: sectionLabelsMap(lang),
+    lang,
     canDownload: () => form.isConnected && state.isAdmin
   });
 }
 
 async function openManeAdmin(status = 'pending') {
-  if (!state.isAdmin) return toast('仅管理员可访问审核后台。');
+  const lang = getLang();
+  if (!state.isAdmin || !sb) return toast(L('Admin access required.', '仅管理员可访问审核后台。', lang));
   openModal(`
-    <div class="modal-eyebrow">MODERATION · 鬃毛邮报管理后台</div>
-    <h2>鬃毛邮报审核中心</h2>
+    <div class="modal-eyebrow">MODERATION · ${esc(t('modeMane', {}, lang))}</div>
+    <h2>${esc(t('adminTitle', {}, lang))}</h2>
     <div class="moderation-tabs">
-      ${Object.entries(STATUS_LABELS).map(([k, lbl]) =>
-        `<button class="outline-btn ${k === status ? 'selected' : ''}" data-mane-admin="${k}">${lbl}</button>`
+      ${ADMIN_STATUS_KEYS.map((k) =>
+        `<button type="button" class="outline-btn ${k === status ? 'selected' : ''}" data-mane-admin="${k}">${esc(localizeStatus(k, lang))}</button>`
       ).join('')}
-      <button type="button" class="outline-btn" data-mane-export="${esc(status)}">导出 Excel</button>
-      <button class="outline-btn" data-action="mane-maps-admin">地图管理</button>
-      <button class="ghost-btn" data-action="fb-admin-open">切换至焦点闪回后台 ⇄</button>
+      <button type="button" class="outline-btn" data-mane-export="${esc(status)}">${esc(t('adminExportExcel', {}, lang))}</button>
+      <button type="button" class="outline-btn" data-action="mane-maps-admin">${esc(t('adminMapsManage', {}, lang))}</button>
+      <button type="button" class="ghost-btn" data-action="fb-admin-open">${esc(t('modeFlashback', {}, lang))} ⇄</button>
     </div>
-    <div id="adminList"><p class="modal-subtitle">正在读取 ${STATUS_LABELS[status]} 列表…</p></div>`, true);
+    <div id="adminList"><p class="modal-subtitle">${esc(t('emptyTitleLoading', {}, lang))}</p></div>`, true);
 
   const list = $('#adminList');
   try {
     const maps = await checked(sb.from('mane_maps').select('id,name,section,edition,active')
-      .order('edition', {ascending: false}).order('position'));
+      .order('edition', { ascending: false }).order('position'));
     const groups = new Map();
     for (const map of maps) {
-      const label = `${map.edition} · ${MANE_SECTIONS[map.section]}`;
+      const label = `${map.edition} · ${localizeSection(map.section, lang)}`;
       if (!groups.has(label)) groups.set(label, []);
-      groups.get(label).push([map.id, map.active ? map.name : `${map.name}（隐藏）`]);
+      const bName = displayBossName(map.name, lang);
+      groups.get(label).push([map.id, map.active ? bName : `${bName} (${L('Hidden', '隐藏', lang)})`]);
     }
     const fetchRows = (filters) => checked(filterModerationRows(
       sb.from('mane_entries')
@@ -4437,78 +6816,81 @@ async function openManeAdmin(status = 'pending') {
         .is('archived_at', null),
       filters, 'map_id', 'division'
     ));
-    await renderFilteredAdmin(list, 'mane', status, '地图', [...groups], fetchRows, (rows) => rows.length
+    const teamJoiner = isEn(lang) ? ', ' : '、';
+    await renderFilteredAdmin(list, 'mane', status, t('fieldBoss', {}, lang), [...groups], fetchRows, (rows) => rows.length
       ? rows.map((row) => {
           const map = maps.find((m) => m.id === row.map_id);
           return `
             <article class="review-card" data-entry="${esc(row.id)}" data-revision="${esc(row.updated_at)}" data-status="${esc(status)}">
               <div class="review-top">
                 <strong>${esc(row.display_name)}</strong>
-                <span class="score-value" style="font-size:16px">${formatScore(row.score)}</span>
+                <span class="score-value" style="font-size:16px">${formatScore(row.score, lang)}</span>
               </div>
               <div class="review-meta">
-                ${esc(map?.name || '已隐藏地图')} · ${DIVISIONS[row.division] || row.division} · ${formatDateTime(row.created_at)}<br/>
-                主 C：${esc(row.carry)} ｜ 配队：${esc((row.team || []).join('、'))}
-                ${renderAdminBuildSummaryHtml(row)}
-                ${row.review_note ? `<br/>备注：${esc(row.review_note)}` : ''}
+                ${esc(map ? displayBossName(map.name, lang) : L('Hidden Boss', '已隐藏地图', lang))} · ${esc(localizeDivision(row.division, lang))} · ${esc(formatDateTime(row.created_at, lang))}<br/>
+                ${esc(t('mainDpsLabel', {}, lang))}: ${esc(displayCarryNames(row.carry, lang))} | ${esc(t('colLineup', {}, lang))}: ${esc((row.team || []).map((n) => displayCharacterName(n, lang)).join(teamJoiner))}
+                ${renderAdminBuildSummaryHtml(row, lang)}
+                ${row.review_note ? `<br/>${esc(L('Note', '备注', lang))}: ${esc(row.review_note)}` : ''}
               </div>
-              ${adminContact(row.submission_contacts)}${safeLinkHtml(row.related_url)}
-              ${reviewProofHtml('mane', row.id, row.evidence_path)}
+              ${adminContact(row.submission_contacts, lang)}${safeLinkHtml(row.related_url, t('relatedLink', {}, lang))}
+              ${reviewProofHtml('mane', row.id, row.evidence_path, lang)}
               <div class="review-actions">
-                <button class="outline-btn" data-mane-edit="${esc(row.id)}">编辑成绩</button>
-                ${status === 'pending' ? '<button class="approve-btn" data-mane-decision="approved">✓ 通过</button><button class="danger-btn" data-mane-decision="rejected">× 拒绝</button>' : ''}
-                ${status === 'approved' ? '<button class="danger-btn" data-mane-decision="removed">撤下</button>' : ''}
-                ${status === 'rejected' ? '<button class="approve-btn" data-action="mane-reopen">退回待审核</button><button class="danger-btn" data-action="mane-delete-rejected">删除</button>' : ''}
+                <button type="button" class="outline-btn" data-mane-edit="${esc(row.id)}">${esc(t('adminEdit', {}, lang))}</button>
+                ${status === 'pending' ? `<button type="button" class="approve-btn" data-mane-decision="approved">✓ ${esc(t('adminApprove', {}, lang))}</button><button type="button" class="danger-btn" data-mane-decision="rejected">× ${esc(t('adminReject', {}, lang))}</button>` : ''}
+                ${status === 'approved' ? `<button type="button" class="danger-btn" data-mane-decision="removed">${esc(t('adminDelete', {}, lang))}</button>` : ''}
+                ${status === 'rejected' ? `<button type="button" class="approve-btn" data-action="mane-reopen">${esc(L('Reopen', '退回待审核', lang))}</button><button type="button" class="danger-btn" data-action="mane-delete-rejected">${esc(t('adminDelete', {}, lang))}</button>` : ''}
               </div>
             </article>`;
         }).join('')
-      : '<div class="empty-state"><h3>暂无符合条件的投稿</h3></div>');
+      : `<div class="empty-state"><h3>${esc(t('emptyTitleEmpty', {}, lang))}</h3></div>`);
   } catch (err) {
-    if (list?.isConnected) list.innerHTML = `<p class="modal-subtitle">读取失败：${esc(err.message)}</p>`;
+    if (list?.isConnected) list.innerHTML = `<p class="modal-subtitle">${esc(err.message)}</p>`;
   }
 }
 
 async function openManeMapsAdmin() {
-  if (!state.isAdmin) return;
+  const lang = getLang();
+  if (!state.isAdmin || !sb) return;
   const maps = await checked(sb.from('mane_maps').select('*').order('edition', { ascending: false }).order('position'));
   openModal(`
-    <div class="modal-eyebrow">MANE MAPS · 地图管理</div>
-    <h2>鬃毛邮报首领地图管理</h2>
-    <div class="moderation-tabs"><button class="outline-btn" data-mane-admin="pending">← 返回审核</button></div>
+    <div class="modal-eyebrow">MANE MAPS</div>
+    <h2>${esc(t('adminMapsManage', {}, lang))}</h2>
+    <div class="moderation-tabs"><button type="button" class="outline-btn" data-mane-admin="pending">← ${esc(t('btnCancel', {}, lang))}</button></div>
     <form id="maneMapForm" style="margin-bottom:18px">
       <div class="form-grid">
-        <div class="field"><label for="mmName">地图名称 *</label><input id="mmName" name="name" required maxlength="60" /></div>
-        <div class="field"><label for="mmEd">版本 *</label><input id="mmEd" name="edition" required maxlength="30" value="${esc(maps[0]?.edition || '4.1')}" /></div>
-        <div class="field"><label for="mmSec">分区</label><select id="mmSec" name="section">${optionsHtml(Object.entries(MANE_SECTIONS), 'new')}</select></div>
-        <div class="field"><label for="mmPos">排序值</label><input id="mmPos" name="position" type="number" min="1" value="100" required /></div>
+        <div class="field"><label for="mmName">${esc(t('fieldBoss', {}, lang))} *</label><input id="mmName" name="name" required maxlength="60" /></div>
+        <div class="field"><label for="mmEd">${esc(t('fieldVersion', {}, lang))} *</label><input id="mmEd" name="edition" required maxlength="30" value="${esc(maps[0]?.edition || '4.1')}" /></div>
+        <div class="field"><label for="mmSec">${esc(t('sectionLabel', {}, lang))}</label><select id="mmSec" name="section">${optionsHtml(Object.entries(sectionLabelsMap(lang)), 'new')}</select></div>
+        <div class="field"><label for="mmPos">${esc(L('Order', '排序值', lang))}</label><input id="mmPos" name="position" type="number" min="1" value="100" required /></div>
       </div>
-      <div class="form-actions"><button type="submit" class="copper-btn">新增首领地图</button></div>
+      <div class="form-actions"><button type="submit" class="copper-btn">${esc(L('Add Boss', '新增首领地图', lang))}</button></div>
     </form>
     ${maps.map((m) => `
       <article class="review-card" style="display:flex;align-items:center;justify-content:space-between;gap:12px">
         <div>
-          <strong>${esc(m.name)}</strong>
-          <div class="review-meta" style="margin:2px 0 0">${esc(m.edition)} · ${MANE_SECTIONS[m.section] || m.section} · 状态：${m.active ? '显示中' : '已隐藏'}</div>
+          <strong>${esc(displayBossName(m.name, lang))}</strong>
+          <div class="review-meta" style="margin:2px 0 0">${esc(m.edition)} · ${esc(localizeSection(m.section, lang))} · ${esc(m.active ? L('Visible', '显示中', lang) : L('Hidden', '已隐藏', lang))}</div>
         </div>
-        <button class="outline-btn" data-toggle-mane-map="${esc(m.id)}" data-active="${m.active}">${m.active ? '隐藏地图' : '恢复显示'}</button>
+        <button type="button" class="outline-btn" data-toggle-mane-map="${esc(m.id)}" data-active="${m.active}">${esc(m.active ? L('Hide', '隐藏地图', lang) : L('Restore', '恢复显示', lang))}</button>
       </article>`).join('')}`, true);
 }
 
 async function openFbAdmin(tab = 'pending', openStage = '') {
-  if (!state.isAdmin) return toast('仅管理员可访问审核后台。');
-  if (!Object.hasOwn(FB_ADMIN_TABS, tab)) tab = 'pending';
+  const lang = getLang();
+  if (!state.isAdmin || !sb) return toast(L('Admin access required.', '仅管理员可访问审核后台。', lang));
+  if (!FB_ADMIN_TAB_KEYS.includes(tab)) tab = 'pending';
   openModal(`
-    <div class="modal-eyebrow">MODERATION · 焦点闪回管理后台</div>
-    <h2>焦点闪回审核中心</h2>
+    <div class="modal-eyebrow">MODERATION · ${esc(t('modeFlashback', {}, lang))}</div>
+    <h2>${esc(t('adminTitle', {}, lang))}</h2>
     <div class="moderation-tabs">
-      ${Object.entries(FB_ADMIN_TABS)
-        .filter(([k]) => k !== 'historical' || state.fbArchives.length)
-        .map(([k, lbl]) => `<button class="outline-btn ${k === tab ? 'selected' : ''}" data-fb-admin="${k}">${lbl}</button>`)
+      ${FB_ADMIN_TAB_KEYS
+        .filter((k) => k !== 'historical' || state.fbArchives.length)
+        .map((k) => `<button type="button" class="outline-btn ${k === tab ? 'selected' : ''}" data-fb-admin="${k}">${esc(localizeStatus(k, lang))}</button>`)
         .join('')}
-      <button class="outline-btn" data-action="fb-versions-admin">版本管理</button>
-      <button class="ghost-btn" data-mane-admin="pending">切换至鬃毛邮报后台 ⇄</button>
+      <button type="button" class="outline-btn" data-action="fb-versions-admin">${esc(t('adminVersionsManage', {}, lang))}</button>
+      <button type="button" class="ghost-btn" data-mane-admin="pending">${esc(t('modeMane', {}, lang))} ⇄</button>
     </div>
-    <div id="adminList"><p class="modal-subtitle">正在读取 ${FB_ADMIN_TABS[tab]} 列表…</p></div>`, true);
+    <div id="adminList"><p class="modal-subtitle">${esc(t('emptyTitleLoading', {}, lang))}</p></div>`, true);
 
   const list = $('#adminList');
   if (tab === 'historical') {
@@ -4516,90 +6898,90 @@ async function openFbAdmin(tab = 'pending', openStage = '') {
       const rows = state.fbArchives.filter((a) => a.stage_id === st.id).sort((a, b) => a.display_order - b.display_order);
       if (!rows.length) return '';
       return `<details class="review-card" ${openStage === st.id ? 'open' : ''}>
-        <summary>${esc(v.label)} · ${esc(st.name)} · ${rows.length} 条</summary>
+        <summary>${esc(localizeVersionLabel(v, lang))} · ${esc(localizeStageName(st, lang))} · ${rows.length}</summary>
         ${rows.map((r) => `<div class="review-card" style="margin-top:8px">
           <strong>${esc(r.credited_player)}</strong>
-          <div class="review-meta">主 C：${(r.carry_names || []).map(esc).join('／')} · ${esc(r.lineup_label)}</div>
-          <button class="danger-btn" data-fb-archive="fb-archive-history" data-id="${esc(r.id)}" data-stage="${esc(st.id)}">删除档案</button>
+          <div class="review-meta">${esc(t('mainDpsLabel', {}, lang))}: ${(r.carry_names || []).map((c) => esc(displayCharacterName(c, lang))).join(' / ')} · ${esc(r.lineup_label)}</div>
+          <button type="button" class="danger-btn" data-fb-archive="fb-archive-history" data-id="${esc(r.id)}" data-stage="${esc(st.id)}">${esc(t('adminDelete', {}, lang))}</button>
         </div>`).join('')}
       </details>`;
-    })).join('') || '<p class="modal-subtitle">暂无历史档案。</p>';
+    })).join('') || `<p class="modal-subtitle">${esc(t('emptyTitleEmpty', {}, lang))}</p>`;
     return;
   }
 
   try {
     const groups = state.fbVersions.map((v) =>
-      [v.label, standardStages(v.id).map((stage) => [stage.id, stage.name])]);
+      [localizeVersionLabel(v, lang), standardStages(v.id).map((stage) => [stage.id, localizeStageName(stage, lang)])]);
     const fetchRows = async (filters) => {
       const rows = await checked(filterModerationRows(
         sb.from('flashback_moderation_list').select('*').eq('status', tab),
         filters, 'stage_id', 'group_code'
       ));
       if (!rows.length) return rows;
-
       const builds = await checked(sb.from('submissions').select('id,team_psychubes,team_resonance_codes')
         .in('id', rows.slice(0, moderationPageSize).map((row) => row.id)));
       const buildsById = new Map(builds.map((build) => [build.id, build]));
-      return rows.map((row) => ({...row, ...buildsById.get(row.id)}));
+      return rows.map((row) => ({ ...row, ...buildsById.get(row.id) }));
     };
-    await renderFilteredAdmin(list, 'flashback', tab, '关卡', groups, fetchRows, (rows) => rows.length
+    const teamJoiner = isEn(lang) ? ' / ' : ' / ';
+    await renderFilteredAdmin(list, 'flashback', tab, t('fieldStage', {}, lang), groups, fetchRows, (rows) => rows.length
       ? rows.map((r) => {
-          const name = r.display_name;
           const st = state.fbStages.find((s) => s.id === r.stage_id);
           const v = state.fbVersions.find((x) => x.id === st?.version_id);
           return `
             <article class="review-card">
               <div class="review-top">
-                <strong>${esc(name)} <span class="division-chip">${r.rounds} 回合</span></strong>
-                <span style="font-size:12px;color:var(--ink-muted)">${formatDateTime(r.created_at)}</span>
+                <strong>${esc(r.display_name)} <span class="division-chip">${esc(t('roundsFull', { n: r.rounds }, lang))}</span></strong>
+                <span style="font-size:12px;color:var(--ink-muted)">${esc(formatDateTime(r.created_at, lang))}</span>
               </div>
               <div class="review-meta">
-                ${esc(v?.label || '未知版本')} · ${esc(st?.name || '未知关卡')} · ${DIVISIONS[r.group_code] || r.group_code}<br/>
-                主 C：${esc(r.carry_name)} ｜ 队伍：${(r.team || []).map(esc).join(' / ')}
-                ${renderAdminBuildSummaryHtml(r)}
-                ${r.status === 'removed' ? `<br/>撤销原因：${esc(r.review_note || '未记录')}` :
-                  r.status === 'rejected' ? `<br/>拒绝理由：${esc(r.review_note || '未记录')}` : ''}
+                ${esc(v ? localizeVersionLabel(v, lang) : '')} · ${esc(st ? localizeStageName(st, lang) : '')} · ${esc(localizeDivision(r.group_code, lang))}<br/>
+                ${esc(t('mainDpsLabel', {}, lang))}: ${esc(displayCarryNames(r.carry_name, lang))} | ${esc(t('colLineup', {}, lang))}: ${(r.team || []).map((n) => esc(displayCharacterName(n, lang))).join(teamJoiner)}
+                ${renderAdminBuildSummaryHtml(r, lang)}
+                ${r.review_note ? `<br/>${esc(L('Note', '备注', lang))}: ${esc(r.review_note)}` : ''}
               </div>
-              ${r.resonance_ten ? resonanceBadge : ''}${adminContact(r.contact)}${safeLinkHtml(r.related_url)}
-              ${reviewProofHtml('flashback', r.id, r.evidence_path)}
+              ${r.resonance_ten ? resonanceBadgeHtml(lang) : ''}${adminContact(r.contact, lang)}${safeLinkHtml(r.related_url, t('relatedLink', {}, lang))}
+              ${reviewProofHtml('flashback', r.id, r.evidence_path, lang)}
               <div class="review-actions">
-                ${tab === 'pending' ? `<button class="approve-btn" data-fb-review="approved" data-id="${esc(r.id)}">✓ 审核通过</button><button class="danger-btn" data-fb-review="rejected" data-id="${esc(r.id)}">× 拒绝</button>` : ''}
-                ${tab === 'approved' ? `<button class="danger-btn" data-fb-remove="${esc(r.id)}">移除成绩</button>` : ''}
-                ${tab === 'rejected' ? `<button class="approve-btn" data-fb-reopen="${esc(r.id)}">退回待审核</button>` : ''}
-                <button class="outline-btn" data-fb-edit="${esc(r.id)}" data-tab="${esc(tab)}">编辑成绩</button>
-                <button class="danger-btn" data-fb-archive="fb-archive-record" data-id="${esc(r.id)}" data-tab="${esc(tab)}">删除成绩</button>
+                ${tab === 'pending' ? `<button type="button" class="approve-btn" data-fb-review="approved" data-id="${esc(r.id)}">✓ ${esc(t('adminApprove', {}, lang))}</button><button type="button" class="danger-btn" data-fb-review="rejected" data-id="${esc(r.id)}">× ${esc(t('adminReject', {}, lang))}</button>` : ''}
+                ${tab === 'approved' ? `<button type="button" class="danger-btn" data-fb-remove="${esc(r.id)}">${esc(t('adminDelete', {}, lang))}</button>` : ''}
+                ${tab === 'rejected' ? `<button type="button" class="approve-btn" data-fb-reopen="${esc(r.id)}">${esc(L('Reopen', '退回待审核', lang))}</button>` : ''}
+                <button type="button" class="outline-btn" data-fb-edit="${esc(r.id)}" data-tab="${esc(tab)}">${esc(t('adminEdit', {}, lang))}</button>
+                <button type="button" class="danger-btn" data-fb-archive="fb-archive-record" data-id="${esc(r.id)}" data-tab="${esc(tab)}">${esc(L('Archive', '删除成绩', lang))}</button>
               </div>
             </article>`;
         }).join('')
-      : '<div class="empty-state"><h3>暂无符合条件的投稿</h3></div>');
+      : `<div class="empty-state"><h3>${esc(t('emptyTitleEmpty', {}, lang))}</h3></div>`);
   } catch (err) {
-    if (list?.isConnected) list.innerHTML = `<p class="modal-subtitle">读取失败：${esc(err.message)}</p>`;
+    if (list?.isConnected) list.innerHTML = `<p class="modal-subtitle">${esc(err.message)}</p>`;
   }
 }
 
 function openFbVersionManager() {
+  const lang = getLang();
   if (!state.isAdmin) return;
   openModal(`
-    <div class="modal-eyebrow">FLASHBACK VERSIONS · 版本管理</div>
-    <h2>焦点闪回版本与重复关卡管理</h2>
+    <div class="modal-eyebrow">FLASHBACK CYCLES</div>
+    <h2>${esc(t('adminVersionsManage', {}, lang))}</h2>
     <div class="moderation-tabs">
-      <button class="outline-btn" data-fb-admin="pending">← 返回审核</button>
-      <button class="copper-btn" data-fb-edit-version="">＋ 新建版本</button>
+      <button type="button" class="outline-btn" data-fb-admin="pending">← ${esc(t('btnCancel', {}, lang))}</button>
+      <button type="button" class="copper-btn" data-fb-edit-version="">+ ${esc(L('New Cycle', '新建版本', lang))}</button>
     </div>
     ${state.fbVersions.map((v) => `
       <article class="review-card">
-        <strong>${esc(v.label)}</strong>
+        <strong>${esc(localizeVersionLabel(v, lang))}</strong>
         <ul class="review-meta" style="margin:6px 0">
-          ${standardStages(v.id).map((s) => `<li>${esc(s.name)}${challengeOccurrences(s) > 1 ? ' · 关联重复关卡' : ''}</li>`).join('')}
+          ${standardStages(v.id).map((s) => `<li>${esc(localizeStageName(s, lang))}${challengeOccurrences(s) > 1 ? ` · ${esc(L('Linked recurring stage', '关联重复关卡', lang))}` : ''}</li>`).join('')}
         </ul>
         <div class="review-actions">
-          <button class="outline-btn" data-fb-edit-version="${esc(v.id)}">编辑版本</button>
-          <button class="danger-btn" data-fb-archive="fb-archive-version" data-id="${esc(v.id)}">删除版本</button>
+          <button type="button" class="outline-btn" data-fb-edit-version="${esc(v.id)}">${esc(t('adminEdit', {}, lang))}</button>
+          <button type="button" class="danger-btn" data-fb-archive="fb-archive-version" data-id="${esc(v.id)}">${esc(t('adminDelete', {}, lang))}</button>
         </div>
-      </article>`).join('') || '<p class="modal-subtitle">暂无版本。</p>'}`, true);
+      </article>`).join('') || `<p class="modal-subtitle">${esc(t('emptyTitleEmpty', {}, lang))}</p>`}`, true);
 }
 
 function openFbVersionEditor(versionId = '') {
+  const lang = getLang();
   const version = state.fbVersions.find((v) => v.id === versionId);
   const stages = standardStages(versionId);
   const repeatOpts = (stage) => {
@@ -4607,36 +6989,37 @@ function openFbVersionEditor(versionId = '') {
     for (const v of state.fbVersions) {
       for (const c of standardStages(v.id)) {
         if (c.id === stage?.id || groups.has(c.challenge_id)) continue;
-        groups.set(c.challenge_id, `${v.code} · ${c.name}`);
+        groups.set(c.challenge_id, `${v.code} · ${localizeStageName(c, lang)}`);
       }
     }
-    if (stage && !groups.has(stage.challenge_id)) groups.set(stage.challenge_id, '保留此关当前归属');
-    return `<option value="">${stage ? '取消关联，作为新独立关卡' : '作为独立关卡'}</option>` +
+    if (stage && !groups.has(stage.challenge_id)) groups.set(stage.challenge_id, L('Keep current link', '保留此关当前归属', lang));
+    return `<option value="">${esc(stage ? L('Unlink as standalone stage', '取消关联，作为新独立关卡', lang) : L('Standalone stage', '作为独立关卡', lang))}</option>` +
       [...groups.entries()].map(([id, lbl]) => `<option value="${esc(id)}"${id === stage?.challenge_id ? ' selected' : ''}>${esc(lbl)}</option>`).join('');
   };
   openModal(`
-    <h2>${version ? '编辑版本' : '新建版本'}</h2>
+    <h2>${esc(version ? L('Edit Cycle', '编辑版本', lang) : L('New Cycle', '新建版本', lang))}</h2>
     <form id="fbVersionForm" data-id="${esc(versionId)}">
       <div class="form-grid">
-        <div class="field"><label for="fvCode">版本代号 *</label><input id="fvCode" name="code" required maxlength="30" value="${esc(version?.code || '')}" /></div>
-        <div class="field"><label for="fvLabel">展示名称 *</label><input id="fvLabel" name="label" required maxlength="80" value="${esc(version?.label || '')}" /></div>
+        <div class="field"><label for="fvCode">${esc(L('Version Code *', '版本代号 *', lang))}</label><input id="fvCode" name="code" required maxlength="30" value="${esc(version?.code || '')}" /></div>
+        <div class="field"><label for="fvLabel">${esc(L('Display Label *', '展示名称 *', lang))}</label><input id="fvLabel" name="label" required maxlength="80" value="${esc(version?.label || '')}" /></div>
       </div>
       ${[1, 2, 3].map((i) => {
         const st = stages.find((s) => s.stage_no === i);
         return `<div class="form-grid">
-          <div class="field"><label for="fvSt${i}">第 ${i} 关名称 *</label><input id="fvSt${i}" name="stage${i}" required maxlength="80" value="${esc(st?.name || '')}" /></div>
-          <div class="field"><label for="fvRep${i}">第 ${i} 关 · 关联重复关卡</label><select id="fvRep${i}" name="repeat${i}">${repeatOpts(st)}</select></div>
+          <div class="field"><label for="fvSt${i}">${esc(L(`Stage ${i} Name *`, `第 ${i} 关名称 *`, lang))}</label><input id="fvSt${i}" name="stage${i}" required maxlength="80" value="${esc(st?.name || '')}" /></div>
+          <div class="field"><label for="fvRep${i}">${esc(L(`Stage ${i} · Recurring Link`, `第 ${i} 关 · 关联重复关卡`, lang))}</label><select id="fvRep${i}" name="repeat${i}">${repeatOpts(st)}</select></div>
         </div>`;
       }).join('')}
       <div class="form-actions">
-        <button type="button" class="outline-btn" data-action="fb-versions-admin">返回</button>
-        <button type="submit" class="copper-btn">保存版本</button>
+        <button type="button" class="outline-btn" data-action="fb-versions-admin">${esc(t('btnCancel', {}, lang))}</button>
+        <button type="submit" class="copper-btn">${esc(t('btnSaveChanges', {}, lang))}</button>
       </div>
     </form>`, true);
 }
 
-/* ==================== 总渲染入口 ==================== */
+/* ==================== Master Render Entry ==================== */
 function render() {
+  closeGlossaryPopover();
   posterIndex.clear();
   renderChrome();
   renderMasthead();
@@ -4644,10 +7027,11 @@ function render() {
     ? renderManeWorkspace()
     : renderFlashbackWorkspace();
   writeHash();
+
   const dailyResults = $('#maneDailyResults');
   if (dailyResults) void fillManeDailyResults(dailyResults);
 
-  // 移动端横向滑动首领/关卡条自动将当前选中项居中（仅调节横向 scrollLeft，不影响整页纵滚）
+  // Center active boss/stage horizontally on mobile scrollable strip without shifting page scroll
   const dossierList = document.querySelector('.dossier-list');
   const activeDossier = dossierList?.querySelector('.dossier-item.active');
   if (dossierList && activeDossier && dossierList.scrollWidth > dossierList.clientWidth + 4) {
@@ -4666,20 +7050,62 @@ function render() {
   }
 }
 
-/* ==================== 全局事件委托 ==================== */
+/* ==================== Global Event Delegation ==================== */
 document.addEventListener('click', async (ev) => {
+  if (state.glossaryOpen && !ev.target.closest('#glossaryPopoverRoot') && !ev.target.closest('[data-glossary-term]')) {
+    closeGlossaryPopover();
+  }
+
   const proofImg = ev.target.closest('.proof-img, .proof-upload-preview img');
   if (proofImg?.src) {
-    openProofLightbox(proofImg.src, proofImg.alt || '截图放大预览');
+    openProofLightbox(proofImg.src, proofImg.alt || L('Screenshot zoom preview', '截图放大预览'));
     return;
   }
+
+  const glossaryBtn = ev.target.closest('[data-glossary-term]');
+  if (glossaryBtn) {
+    openGlossaryPopover(glossaryBtn.dataset.glossaryTerm, glossaryBtn);
+    return;
+  }
+  if (ev.target.closest('[data-action="close-glossary"]')) {
+    closeGlossaryPopover();
+    return;
+  }
+
+  const openPsyEl = ev.target.closest('[data-open-psy]');
+  if (openPsyEl) {
+    openPsychubeDossier(openPsyEl.dataset.openPsy);
+    return;
+  }
+  const openCharEl = ev.target.closest('[data-open-char]');
+  if (openCharEl) {
+    openArcanistDossier(openCharEl.dataset.openChar);
+    return;
+  }
+  const openPlayerEl = ev.target.closest('[data-open-player]');
+  if (openPlayerEl) {
+    openInvestigatorDossier(openPlayerEl.dataset.openPlayer);
+    return;
+  }
+
   const btn = ev.target.closest('button, a[data-switch-mode]');
   if (!btn) return;
   const dialog = btn.closest('.modal-box');
 
   try {
+    // Instant EN / 中文 language toggle
+    if (btn.dataset.setLang) {
+      const nextLang = setLang(btn.dataset.setLang);
+      updateUrlLangParam(nextLang);
+      render();
+      if (charPickerState.open) renderCharPicker();
+      if (psyPickerState.open) renderPsychubePicker();
+      return;
+    }
+
     if (btn.dataset.modeSwitch) {
       state.mode = btn.dataset.modeSwitch;
+      state.maneSelectedAppraisal = -1;
       state.highlightRecordId = '';
       state.mobileFilterOpen = false;
       render();
@@ -4689,6 +7115,7 @@ document.addEventListener('click', async (ev) => {
       ev.preventDefault();
       state.mode = btn.dataset.switchMode;
       state.manePage = 'scores';
+      state.maneSelectedAppraisal = -1;
       state.highlightRecordId = '';
       state.mobileFilterOpen = false;
       render();
@@ -4703,8 +7130,95 @@ document.addEventListener('click', async (ev) => {
       return;
     }
 
-    // 刊头「全站最高分 / 全站最快」直达对应榜单并定位高亮
+    // Sidebar / Board Intel Main DPS & Support click-to-filter
+    if (btn.dataset.metaCarry) {
+      const key = btn.dataset.metaCarry;
+      const mode = btn.dataset.metaMode || state.mode;
+      if (mode === 'mane') {
+        state.maneRoleMode = 'carry';
+        state.maneCarry = state.maneCarry === key ? '' : key;
+      } else {
+        state.fbRoleMode = 'carry';
+        state.fbCarry = state.fbCarry === key ? '' : key;
+      }
+      render();
+      return;
+    }
+    if (btn.dataset.metaMember) {
+      const key = btn.dataset.metaMember;
+      const mode = btn.dataset.metaMode || state.mode;
+      if (mode === 'mane') {
+        state.maneRoleMode = 'member';
+        state.maneCarry = state.maneCarry === key ? '' : key;
+      } else {
+        state.fbRoleMode = 'member';
+        state.fbCarry = state.fbCarry === key ? '' : key;
+      }
+      render();
+      return;
+    }
+
+    // V2 Psychube Amplification Lv.1-Lv.5 switcher (live in-place modal update)
+    if (btn.dataset.psyAmpLevel !== undefined) {
+      const nextLv = Math.min(5, Math.max(1, Number(btn.dataset.psyAmpLevel) || 5));
+      state.psyAmpLevel = nextLv;
+      const host = $('#psyPassiveHost');
+      if (host) {
+        const lang = getLang();
+        const detail = getPsychubeDetail(host.dataset.psyId || state.activePsyDossierId, lang);
+        if (detail?.passive) {
+          host.innerHTML = renderPsychubePassiveBlockHtml(detail.passive, nextLv, lang);
+        }
+      }
+      return;
+    }
+
+    // V2 Appraisal milestone selection
+    if (btn.dataset.selectAppraisal !== undefined) {
+      const idx = Number(btn.dataset.selectAppraisal);
+      state.maneSelectedAppraisal = state.maneSelectedAppraisal === idx ? -1 : idx;
+      render();
+      return;
+    }
+
+    // V2 Dossier filter current board
+    if (btn.dataset.filterDossierChar) {
+      const key = btn.dataset.filterDossierChar;
+      if (state.mode === 'mane') {
+        state.manePage = 'scores';
+        state.maneRoleMode = 'member';
+        state.maneCarry = key;
+        state.maneAfflatus = '';
+        state.maneQuery = '';
+      } else {
+        state.fbPage = 'leaderboard';
+        state.fbRoleMode = 'member';
+        state.fbCarry = key;
+        state.fbAfflatus = '';
+        state.fbQuery = '';
+      }
+      closeModal();
+      render();
+      return;
+    }
+
+    // V2 Poster card theme switcher (live toggle without closing modal)
+    if (btn.dataset.posterTheme) {
+      const nextTheme = btn.dataset.posterTheme === 'obsidian' ? 'obsidian' : 'parchment';
+      state.posterTheme = nextTheme;
+      const card = $('#activePosterCard');
+      if (card) card.classList.toggle('is-obsidian', nextTheme === 'obsidian');
+      document.querySelectorAll('[data-poster-theme]').forEach((b) => {
+        const active = b.dataset.posterTheme === nextTheme;
+        b.classList.toggle('active', active);
+        b.setAttribute('aria-pressed', String(active));
+      });
+      return;
+    }
+
+    // Masthead / Dossier peak & fastest jump
     if (btn.dataset.jumpManeRecord) {
+      if (dialog) closeModal();
       state.mode = 'mane';
       state.manePage = 'scores';
       state.maneSection = btn.dataset.jumpSection || 'new';
@@ -4714,14 +7228,15 @@ document.addEventListener('click', async (ev) => {
       state.maneCarry = '';
       state.maneAfflatus = '';
       state.maneQuery = '';
+      state.maneSelectedAppraisal = -1;
       const pid = `mane-${btn.dataset.jumpManeRecord}`;
       state.highlightRecordId = pid;
       pendingScrollRecordId = pid;
       render();
-      toast('已跳转并定位该条榜单纪录。');
       return;
     }
     if (btn.dataset.jumpFbRecord) {
+      if (dialog) closeModal();
       state.mode = 'flashback';
       state.fbPage = 'leaderboard';
       state.fbVersionId = btn.dataset.jumpVer || '';
@@ -4736,7 +7251,6 @@ document.addEventListener('click', async (ev) => {
       state.highlightRecordId = pid;
       pendingScrollRecordId = pid;
       render();
-      toast('已跳转至最短回合纪录所在关卡。');
       return;
     }
 
@@ -4747,7 +7261,6 @@ document.addEventListener('click', async (ev) => {
     }
     if (btn.dataset.jumpManeCarry) {
       const carryKey = btn.dataset.jumpManeCarry;
-      const carryName = btn.dataset.jumpCarryName || '';
       const preferredMap = btn.dataset.jumpMap || '';
       const sectionMaps = activeManeMaps(state.maneSection);
       const mapMatchesCarry = (mapId) => state.maneScores.some((r) =>
@@ -4771,7 +7284,6 @@ document.addEventListener('click', async (ev) => {
       state.maneQuery = '';
       state.highlightRecordId = '';
       render();
-      toast(`已跳转并筛选主 C：${carryName || '所选角色'}。`);
       return;
     }
     if (btn.dataset.jumpManePlayer) {
@@ -4787,12 +7299,10 @@ document.addEventListener('click', async (ev) => {
       state.maneQuery = playerName;
       state.highlightRecordId = '';
       render();
-      toast(`已跳转并筛选调查员：${playerName}。`);
       return;
     }
     if (btn.dataset.jumpFbCarry) {
       const carryKey = btn.dataset.jumpFbCarry;
-      const carryName = btn.dataset.jumpCarryName || '';
       const matches = state.fbRecords.filter((r) =>
         splitCarries(r.carry_name).some((c) => canonicalCharacterKey(c) === carryKey)
       );
@@ -4816,7 +7326,6 @@ document.addEventListener('click', async (ev) => {
       state.fbQuery = '';
       state.highlightRecordId = '';
       render();
-      toast(`已跳转并筛选主 C：${carryName || '所选角色'}。`);
       return;
     }
     if (btn.dataset.jumpFbPlayer) {
@@ -4841,16 +7350,16 @@ document.addEventListener('click', async (ev) => {
       state.fbQuery = playerName;
       state.highlightRecordId = '';
       render();
-      toast(`已跳转并筛选玩家：${playerName}。`);
       return;
     }
 
-    // 鬃毛筛选项
+    // Mane filters
     if (btn.dataset.maneSection) {
       state.maneSection = btn.dataset.maneSection;
       state.maneCarry = '';
       state.maneAfflatus = '';
       state.maneQuery = '';
+      state.maneSelectedAppraisal = -1;
       state.highlightRecordId = '';
       render();
       return;
@@ -4858,6 +7367,7 @@ document.addEventListener('click', async (ev) => {
     if (btn.dataset.maneMap) {
       state.maneMapId = btn.dataset.maneMap;
       state.maneCarry = '';
+      state.maneSelectedAppraisal = -1;
       state.highlightRecordId = '';
       if (state.manePage !== 'scores') state.manePage = 'scores';
       render();
@@ -4866,6 +7376,7 @@ document.addEventListener('click', async (ev) => {
     if (btn.dataset.maneDiv) {
       state.maneDivision = btn.dataset.maneDiv;
       state.maneCarry = '';
+      state.maneSelectedAppraisal = -1;
       state.highlightRecordId = '';
       render();
       return;
@@ -4891,7 +7402,7 @@ document.addEventListener('click', async (ev) => {
       return;
     }
 
-    // 焦点闪回筛选项
+    // Flashback filters
     if (btn.dataset.fbStage) {
       state.fbStageId = btn.dataset.fbStage;
       state.fbCarry = '';
@@ -4929,7 +7440,7 @@ document.addEventListener('click', async (ev) => {
       return;
     }
 
-    // 战报档案卡：导出图片 / 复制直达链接 / 复制文字
+    // Poster modal, PNG export, deep link, copy text, resonance copy
     if (btn.dataset.poster) {
       openPoster(btn.dataset.poster);
       return;
@@ -4939,10 +7450,10 @@ document.addEventListener('click', async (ev) => {
       if (item) {
         btn.disabled = true;
         const oldText = btn.textContent;
-        btn.textContent = '生成中…';
+        btn.textContent = t('posterGenerating');
         try {
           await exportPosterPng(item);
-          toast('纪录图（PNG）已生成并开始下载。');
+          toast(t('posterSavedToast'));
         } finally {
           if (btn.isConnected) {
             btn.disabled = false;
@@ -4956,43 +7467,57 @@ document.addEventListener('click', async (ev) => {
       const item = posterIndex.get(btn.dataset.copyLink);
       if (item) {
         await copyText(buildRecordDeepLink(item));
-        toast('榜单直达链接已复制到剪贴板。');
+        toast(t('posterCopiedLink'));
       }
       return;
     }
     if (btn.dataset.copyPoster) {
+      const lang = getLang();
       const item = posterIndex.get(btn.dataset.copyPoster);
       if (item) {
-        const teamText = (item.canonicalTeam || item.team || []).join('、');
+        const teamText = (item.displayTeam || (item.team || []).map((n) => displayCharacterName(n, lang))).join(isEn(lang) ? ', ' : '、');
         const psyText = (item.psychubes || []).some(Boolean)
-          ? `｜心相：${(item.psychubes || []).map((p) => p || '—').join('/')}`
+          ? (isEn(lang)
+              ? ` | Psychubes: ${(item.psychubes || []).map((p) => (p ? displayPsychubeName(p, lang) : '—')).join(' / ')}`
+              : `｜心相：${(item.psychubes || []).map((p) => (p ? displayPsychubeName(p, lang) : '—')).join('/')}`)
           : '';
         const resText = (item.resonanceCodes || []).some(Boolean)
-          ? `｜共鸣码：${(item.resonanceCodes || []).map((c) => c || '—').join(' / ')}`
+          ? (isEn(lang)
+              ? ` | Resonance: ${(item.resonanceCodes || []).map((c) => c || '—').join(' / ')}`
+              : `｜共鸣码：${(item.resonanceCodes || []).map((c) => c || '—').join(' / ')}`)
           : '';
         const link = buildRecordDeepLink(item);
-        const rankPrefix = item.rank > 0 ? `#${item.rank}` : '每日新分';
-        const res10Text = item.mode === 'flashback' && item.resonanceTen ? '｜全0塑·共鸣10' : '';
-        const text = item.mode === 'mane'
-          ? `【重返未来：1999 鬃毛邮报】${rankPrefix} ${item.title}（${item.subtitle}）｜调查员：${item.player}｜主C：${item.carry}｜阵容：${teamText}${psyText}${resText}｜积分：${formatScore(item.score)}｜${link}`
-          : `【重返未来：1999 焦点闪回】${rankPrefix} ${item.title}（${item.subtitle}${res10Text}）｜玩家：${item.player}｜主C：${item.carry}｜阵容：${teamText}${psyText}${resText}｜成绩：${item.rounds} 回合｜${link}`;
+        const rankPrefix = item.rank > 0 ? `#${item.rank}` : t('posterDailyLabel', {}, lang);
+        let text;
+        if (isEn(lang)) {
+          const res10Text = item.mode === 'flashback' && item.resonanceTen ? ' | All P0 R10' : '';
+          text = item.mode === 'mane'
+            ? `[Reverse: 1999 · Mane's Bulletin] ${rankPrefix} ${item.title} (${item.subtitle}) | Timekeeper: ${item.player} | Main DPS: ${item.carry} | Lineup: ${teamText}${psyText}${resText} | Score: ${formatScore(item.score, lang)} | ${link}`
+            : `[Reverse: 1999 · Focused Flashback] ${rankPrefix} ${item.title} (${item.subtitle}${res10Text}) | Timekeeper: ${item.player} | Main DPS: ${item.carry} | Lineup: ${teamText}${psyText}${resText} | Clear: ${formatRounds(item.rounds, lang)} | ${link}`;
+        } else {
+          const res10Text = item.mode === 'flashback' && item.resonanceTen ? '｜全0塑·共鸣10' : '';
+          text = item.mode === 'mane'
+            ? `【重返未来：1999 鬃毛邮报】${rankPrefix} ${item.title}（${item.subtitle}）｜调查员：${item.player}｜主C：${item.carry}｜阵容：${teamText}${psyText}${resText}｜积分：${formatScore(item.score, lang)}｜${link}`
+            : `【重返未来：1999 焦点闪回】${rankPrefix} ${item.title}（${item.subtitle}${res10Text}）｜玩家：${item.player}｜主C：${item.carry}｜阵容：${teamText}${psyText}${resText}｜成绩：${item.rounds} 回合｜${link}`;
+        }
         await copyText(text);
-        toast('纪录文字与直达链接已复制到剪贴板。');
+        toast(t('posterCopiedText'));
       }
       return;
     }
     if (btn.dataset.copyAllRes) {
+      const lang = getLang();
       const item = posterIndex.get(btn.dataset.copyAllRes);
       if (item) {
-        const slotNames = (item.canonicalTeam && item.canonicalTeam.length && !isLegacyShorthandTeam(item.team))
-          ? item.canonicalTeam
-          : (item.team || []);
+        const slotNames = (item.displayTeam && item.displayTeam.length && !isLegacyShorthandTeam(item.team))
+          ? item.displayTeam
+          : (item.team || []).map((n) => displayCharacterName(n, lang));
         const entries = (item.resonanceCodes || [])
-          .map((code, idx) => ({ code: String(code || '').trim(), name: slotNames[idx] || `${idx + 1}号位` }))
+          .map((code, idx) => ({ code: String(code || '').trim(), name: slotNames[idx] || t('slotLabel', { n: idx + 1 }, lang) }))
           .filter((entry) => entry.code);
         if (entries.length) {
-          await copyText(entries.map((entry) => `${entry.name}：${entry.code}`).join('\n'));
-          toast(`已复制全队 ${entries.length} 条共鸣码。`);
+          await copyText(entries.map((entry) => `${entry.name}: ${entry.code}`).join('\n'));
+          toast(t('posterCopiedAllRes', { n: entries.length }, lang));
         }
       }
       return;
@@ -5003,16 +7528,12 @@ document.addEventListener('click', async (ev) => {
       const code = item?.resonanceCodes?.[idx];
       if (code) {
         await copyText(code);
-        const slotNames = (item.canonicalTeam && item.canonicalTeam.length && !isLegacyShorthandTeam(item.team))
-          ? item.canonicalTeam
-          : (item.team || []);
-        const who = slotNames[idx] || `${idx + 1}号位`;
-        toast(`已复制「${who}」共鸣码。`);
+        toast(t('posterCopiedRes'));
       }
       return;
     }
 
-    // 统一阵容方框选择器 & 主 C 勾选 & 心相方框选择器
+    // Team builder & codex pickers
     if (btn.dataset.toggleCarry !== undefined) {
       const idx = Number(btn.dataset.toggleCarry);
       if (canMarkSlotCarry(modalBuildState.chars[idx])) {
@@ -5076,6 +7597,19 @@ document.addEventListener('click', async (ev) => {
     }
 
     const action = btn.dataset.action;
+    if (action === 'toggle-intel-bar') {
+      state.intelCollapsed = !state.intelCollapsed;
+      render();
+      return;
+    }
+    if (action === 'sync-live') {
+      await syncLiveArchive();
+      return;
+    }
+    if (action === 'export-offline-excel') {
+      await exportOfflineExcel();
+      return;
+    }
     if (action === 'toggle-mobile-filter') {
       state.mobileFilterOpen = !state.mobileFilterOpen;
       render();
@@ -5130,15 +7664,46 @@ document.addEventListener('click', async (ev) => {
       clearSubmitDraft(board);
       if (board === 'mane') openManeSubmitModal();
       else if (board === 'flashback') openFbSubmitModal();
-      toast('已清空未提交草稿。');
+      toast(L('Draft cleared.', '已清空未提交草稿。'));
       return;
     }
     if (action === 'my-submissions' || btn.dataset.progressBoard) {
       openMySubmissions(btn.dataset.progressBoard || state.mode);
       return;
     }
-    if (action === 'refresh') { await loadAllData(); if (state.connected) toast('实时榜单档案已更新。'); return; }
-    if (action === 'refresh-mane-daily') { render(); return; }
+    if (action === 'refresh') {
+      if (state.dataSource === 'offline') {
+        hydrateFromOfflineSnapshot();
+        render();
+        toast(t('toastRefreshed'));
+      } else {
+        await loadAllData({ keepOfflineOnFail: true });
+        if (state.connected) toast(t('toastRefreshed'));
+      }
+      return;
+    }
+    if (action === 'refresh-mane-daily') {
+      if (state.dataSource === 'offline') {
+        hydrateFromOfflineSnapshot();
+      } else if (sb) {
+        state.maneScores = await loadPages('mane_leaderboard', ['id']);
+      }
+      render();
+      toast(t('toastRefreshed'));
+      return;
+    }
+    if (action === 'switch-to-mane' || action === 'switch-to-mane-submit') {
+      closeModal();
+      state.mode = 'mane';
+      state.manePage = 'scores';
+      const rerunMaps = activeManeMaps('rerun');
+      state.maneSection = rerunMaps.length ? 'rerun' : 'new';
+      const targetMaps = activeManeMaps(state.maneSection);
+      if (!targetMaps.some((m) => m.id === state.maneMapId)) state.maneMapId = targetMaps[0]?.id || '';
+      render();
+      if (action === 'switch-to-mane-submit') openManeSubmitModal();
+      return;
+    }
     if (action === 'open-submit' || btn.id === 'submitBtn') {
       if (state.mode === 'mane') openManeSubmitModal();
       else openFbSubmitModal();
@@ -5151,10 +7716,10 @@ document.addEventListener('click', async (ev) => {
     }
     if (action === 'open-login') { openLoginModal(); return; }
     if (action === 'logout') {
-      await checked(sb.auth.signOut());
+      if (sb) await checked(sb.auth.signOut());
       closeModal();
       await syncAuth(null);
-      toast('已退出登录。');
+      toast(L('Signed out.', '已退出登录。'));
       return;
     }
     if (btn.id === 'adminCenterBtn' || action === 'open-admin') {
@@ -5163,9 +7728,9 @@ document.addEventListener('click', async (ev) => {
       return;
     }
 
-    if (!state.isAdmin) return;
+    if (!state.isAdmin || !sb) return;
 
-    // 鬃毛管理员操作
+    // Admin actions (Mane)
     if (btn.dataset.maneAdmin) { await openManeAdmin(btn.dataset.maneAdmin); return; }
     if (btn.dataset.maneExport) { openManeExport(btn.dataset.maneExport); return; }
     if (btn.dataset.maneExportMaps) {
@@ -5180,22 +7745,24 @@ document.addEventListener('click', async (ev) => {
       return;
     }
     if (btn.dataset.maneEdit) {
+      const lang = getLang();
       const row = await checked(sb.from('mane_entries').select('*').eq('id', btn.dataset.maneEdit).single());
       const maps = await checked(sb.from('mane_maps').select('*').order('position'));
       const builds = extractRecordBuilds(row);
       resetModalBuildState(row.team, row.carry, builds.psychubes, builds.resonanceCodes);
       openModal(`
-        <h2>编辑鬃毛成绩</h2>
+        <h2>${esc(t('editRecordTitle', {}, lang))}</h2>
         <form id="maneEditForm" data-id="${esc(row.id)}" data-revision="${esc(row.updated_at)}" data-status="${esc(row.status)}">
-          ${maneScoreFieldsHtml(row, maps)}
+          ${maneScoreFieldsHtml(row, maps, lang)}
           <div class="form-actions">
-            <button type="button" class="outline-btn" data-mane-admin="${esc(row.status)}">返回</button>
-            <button type="submit" class="copper-btn">保存修改</button>
+            <button type="button" class="outline-btn" data-mane-admin="${esc(row.status)}">${esc(t('btnCancel', {}, lang))}</button>
+            <button type="submit" class="copper-btn">${esc(t('btnSaveChanges', {}, lang))}</button>
           </div>
         </form>`, true);
       return;
     }
     if (btn.dataset.maneDecision) {
+      const lang = getLang();
       const card = btn.closest('.review-card');
       const { entry, revision, status } = card.dataset;
       const dec = btn.dataset.maneDecision;
@@ -5203,17 +7770,17 @@ document.addEventListener('click', async (ev) => {
         showRejectionForm(btn, async (reason) => {
           const updated = await checked(sb.from('mane_entries').update({ status: 'rejected', review_note: reason })
             .eq('id', entry).eq('updated_at', revision).select('id'));
-          if (!updated.length) throw new Error('该成绩已被其他管理员修改，请重新打开。');
-          await finishReview(dialog, 'mane', status, '投稿已拒绝。', {card});
-        });
+          if (!updated.length) throw new Error(L('Record was modified by another moderator. Refresh and retry.', '该成绩已被其他管理员修改，请重新打开。', lang));
+          await finishReview(dialog, 'mane', status, L('Submission rejected.', '投稿已拒绝。', lang), { card });
+        }, lang);
         return;
       }
-      if (dec === 'removed' && !window.confirm('确定撤下这条鬃毛成绩？')) return;
+      if (dec === 'removed' && !window.confirm(L('Remove this approved record?', '确定撤下这条鬃毛成绩？', lang))) return;
       btn.disabled = true;
       try {
         const updated = await checked(sb.from('mane_entries').update({ status: dec }).eq('id', entry).eq('updated_at', revision).select('id'));
-        if (!updated.length) throw new Error('该成绩已被其他管理员修改，请重新打开。');
-        await finishReview(dialog, 'mane', status, '审核状态已更新。', {card, changedRankings: true});
+        if (!updated.length) throw new Error(L('Record was modified by another moderator.', '该成绩已被其他管理员修改，请重新打开。', lang));
+        await finishReview(dialog, 'mane', status, t('toastSaved', {}, lang), { card, changedRankings: true });
       } finally {
         btn.disabled = false;
       }
@@ -5223,46 +7790,47 @@ document.addEventListener('click', async (ev) => {
       const { entry, revision } = btn.closest('.review-card').dataset;
       await checked(sb.rpc('reopen_rejected_result', { p_board: 'mane', p_id: entry, p_updated_at: revision }));
       await openManeAdmin('pending');
-      toast('已退回待审核。');
+      toast(L('Reopened to pending queue.', '已退回待审核。'));
       return;
     }
     if (action === 'mane-delete-rejected') {
       const card = btn.closest('.review-card');
-      if (!window.confirm('确定删除这条已拒绝的成绩？')) return;
+      if (!window.confirm(L('Delete this rejected record?', '确定删除这条已拒绝的成绩？'))) return;
       await checked(sb.rpc('mane_archive_rejected', { p_id: card.dataset.entry, p_updated_at: card.dataset.revision }));
       await openManeAdmin('rejected');
-      toast('已删除该条拒绝记录。');
+      toast(L('Rejected record deleted.', '已删除该条拒绝记录。'));
       return;
     }
     if (btn.dataset.toggleManeMap) {
       const active = btn.dataset.active === 'true';
-      if (active && !window.confirm('隐藏此地图及其公开榜单？')) return;
+      if (active && !window.confirm(L('Hide this boss and its public board?', '隐藏此地图及其公开榜单？'))) return;
       await checked(sb.from('mane_maps').update({ active: !active }).eq('id', btn.dataset.toggleManeMap));
       await loadAllData();
       await openManeMapsAdmin();
-      toast('地图显示状态已更新。');
+      toast(t('toastSaved'));
       return;
     }
 
-    // 焦点闪回管理员操作
+    // Admin actions (Flashback)
     if (action === 'fb-admin-open') { await openFbAdmin('pending'); return; }
     if (btn.dataset.fbAdmin) { await openFbAdmin(btn.dataset.fbAdmin); return; }
     if (action === 'fb-versions-admin') { openFbVersionManager(); return; }
     if (btn.dataset.fbEditVersion !== undefined) { openFbVersionEditor(btn.dataset.fbEditVersion); return; }
     if (btn.dataset.fbReview) {
+      const lang = getLang();
       const approved = btn.dataset.fbReview === 'approved';
       const card = btn.closest('.review-card');
       if (!approved) {
         showRejectionForm(btn, async (reason) => {
           await checked(sb.rpc('review_submission', { p_submission_id: btn.dataset.id, p_decision: 'rejected', p_note: reason }));
-          await finishReview(dialog, 'flashback', 'pending', '投稿已拒绝。', {card});
-        });
+          await finishReview(dialog, 'flashback', 'pending', L('Submission rejected.', '投稿已拒绝。', lang), { card });
+        }, lang);
         return;
       }
       btn.disabled = true;
       try {
         await checked(sb.rpc('review_submission', { p_submission_id: btn.dataset.id, p_decision: btn.dataset.fbReview, p_note: '' }));
-        await finishReview(dialog, 'flashback', 'pending', '审核通过。', {card, changedRankings: true});
+        await finishReview(dialog, 'flashback', 'pending', L('Submission approved.', '审核通过。', lang), { card, changedRankings: true });
       } finally {
         btn.disabled = false;
       }
@@ -5271,59 +7839,61 @@ document.addEventListener('click', async (ev) => {
     if (btn.dataset.fbReopen) {
       await checked(sb.rpc('reopen_rejected_result', { p_board: 'flashback', p_id: btn.dataset.fbReopen }));
       await openFbAdmin('pending');
-      toast('已退回待审核。');
+      toast(L('Reopened to pending queue.', '已退回待审核。'));
       return;
     }
     if (btn.dataset.fbRemove) {
-      const reason = window.prompt('请输入移除原因（2–200 字）：');
+      const reason = window.prompt(L('Enter removal reason (2–200 chars):', '请输入移除原因（2–200 字）：'));
       if (reason === null) return;
       const note = reason.trim();
-      if (note.length < 2 || note.length > 200) return toast('移除原因须为 2–200 字。');
-      if (!window.confirm('确认移除这条已通过成绩并重算荣誉？')) return;
+      if (note.length < 2 || note.length > 200) return toast(L('Reason must be 2–200 characters.', '移除原因须为 2–200 字。'));
+      if (!window.confirm(L('Remove this approved record and recalculate honors?', '确认移除这条已通过成绩并重算荣誉？'))) return;
       await checked(sb.rpc('remove_submission', { p_submission_id: btn.dataset.fbRemove, p_reason: note }));
-      await finishReview(dialog, 'flashback', 'approved', '成绩已移除。', {
+      await finishReview(dialog, 'flashback', 'approved', L('Record removed.', '成绩已移除。'), {
         card: btn.closest('.review-card'), changedRankings: true
       });
       return;
     }
     if (btn.dataset.fbEdit) {
+      const lang = getLang();
       const id = btn.dataset.fbEdit;
       const tab = btn.dataset.tab || 'pending';
-      const rec = await checked(sb.from('submissions')
-        .select('*,profiles(display_name)')
-        .eq('id', id).single());
+      const rec = await checked(sb.from('submissions').select('*,profiles(display_name)').eq('id', id).single());
       const builds = extractRecordBuilds(rec);
       resetModalBuildState(rec.team, rec.carry_name, builds.psychubes, builds.resonanceCodes);
       const stageOpts = state.fbVersions.map((v) =>
-        `<optgroup label="${esc(v.label)}">${standardStages(v.id).map((s) => `<option value="${esc(s.id)}"${s.id === rec.stage_id ? ' selected' : ''}>${esc(s.name)}</option>`).join('')}</optgroup>`
+        `<optgroup label="${esc(localizeVersionLabel(v, lang))}">${standardStages(v.id).map((s) => `<option value="${esc(s.id)}"${s.id === rec.stage_id ? ' selected' : ''}>${esc(localizeStageName(s, lang))}</option>`).join('')}</optgroup>`
       ).join('');
       openModal(`
-        <h2>编辑焦点闪回成绩</h2>
+        <h2>${esc(t('editRecordTitle', {}, lang))}</h2>
         <form id="fbEditForm" data-id="${esc(id)}" data-tab="${esc(tab)}">
           <div class="form-grid">
-            <div class="field"><label for="feStage">版本与关卡</label><select id="feStage" name="stage" required>${stageOpts}</select></div>
-            <div class="field"><label for="feGroup">塑造分组</label><select id="feGroup" name="group">${optionsHtml(Object.entries(DIVISIONS), rec.group_code)}</select></div>
+            <div class="field"><label for="feStage">${esc(t('fieldStage', {}, lang))}</label><select id="feStage" name="stage" required>${stageOpts}</select></div>
+            <div class="field"><label for="feGroup">${esc(t('fieldDivision', {}, lang))}</label><select id="feGroup" name="group">${optionsHtml(Object.entries(divisionLabelsMap(lang)), rec.group_code)}</select></div>
           </div>
           <div class="form-grid">
-                <div class="field"><label for="feName">展示昵称</label><input id="feName" name="name" value="${esc(rec.credited_player || '')}" placeholder="${esc(rec.profiles?.display_name || '')}" minlength="2" maxlength="80" ${rec.source_history_id ? 'required' : ''} /></div>
-            <div class="field"><label for="feRounds">通关回合</label><select id="feRounds" name="rounds">${Array.from({ length: 7 }, (_, n) => `<option value="${n}"${rec.rounds === n ? ' selected' : ''}>${n} 回合</option>`).join('')}</select></div>
+            <div class="field"><label for="feName">${esc(t('fieldPlayerName', {}, lang))}</label><input id="feName" name="name" value="${esc(rec.credited_player || '')}" placeholder="${esc(rec.profiles?.display_name || '')}" minlength="2" maxlength="80" ${rec.source_history_id ? 'required' : ''} /></div>
+            <div class="field"><label for="feRounds">${esc(t('fieldRounds', {}, lang))}</label><select id="feRounds" name="rounds">${Array.from({ length: 7 }, (_, n) => `<option value="${n}"${rec.rounds === n ? ' selected' : ''}>${esc(t('roundsFull', { n }, lang))}</option>`).join('')}</select></div>
           </div>
-          ${resonanceChoice(rec.group_code, rec.resonance_ten)}
-          ${renderTeamBuilderFieldHtml()}
-          <div class="field"><label for="feUrl">相关链接</label><input id="feUrl" name="url" type="url" maxlength="2048" value="${esc(rec.related_url || '')}" /></div>
+          ${resonanceChoice(rec.group_code, rec.resonance_ten, lang)}
+          ${renderTeamBuilderFieldHtml(lang)}
+          <div class="field"><label for="feUrl">${esc(t('fieldRelatedUrl', {}, lang))}</label><input id="feUrl" name="url" type="url" maxlength="2048" value="${esc(rec.related_url || '')}" /></div>
           <div class="form-actions">
-            <button type="button" class="outline-btn" data-fb-admin="${esc(tab)}">返回</button>
-            <button type="submit" class="copper-btn">保存修改</button>
+            <button type="button" class="outline-btn" data-fb-admin="${esc(tab)}">${esc(t('btnCancel', {}, lang))}</button>
+            <button type="submit" class="copper-btn">${esc(t('btnSaveChanges', {}, lang))}</button>
           </div>
         </form>`, true);
       return;
     }
     if (btn.dataset.fbArchive) {
+      const lang = getLang();
       const cfg = FB_ARCHIVE_ACTIONS[btn.dataset.fbArchive];
-      if (!cfg || !window.confirm(`删除${cfg.label}？删除后会从列表与统计中撤下。`)) return;
+      if (!cfg) return;
+      const targetLabel = isEn(lang) ? cfg.en : cfg.zh;
+      if (!window.confirm(L(`Delete ${targetLabel}? This removes it from public boards and stats.`, `删除${targetLabel}？删除后会从列表与统计中撤下。`, lang))) return;
       await checked(sb.rpc(cfg.rpc, { [cfg.arg]: btn.dataset.id }));
       if (btn.dataset.fbArchive === 'fb-archive-record') {
-        await finishReview(dialog, 'flashback', btn.dataset.tab || 'pending', '已删除。', {
+        await finishReview(dialog, 'flashback', btn.dataset.tab || 'pending', L('Deleted.', '已删除。', lang), {
           card: btn.closest('.review-card'), changedRankings: btn.dataset.tab === 'approved'
         });
         return;
@@ -5331,77 +7901,85 @@ document.addEventListener('click', async (ev) => {
       await loadAllData();
       if (btn.dataset.fbArchive === 'fb-archive-version') openFbVersionManager();
       else await openFbAdmin(btn.dataset.fbArchive === 'fb-archive-history' ? 'historical' : (btn.dataset.tab || 'pending'), btn.dataset.stage || '');
-      toast('已删除。');
+      toast(L('Deleted.', '已删除。', lang));
     }
   } catch (err) {
-    toast(err.message || '操作未完成，请重试。');
+    toast(err.message || L('Operation failed. Please try again.', '操作未完成，请重试。'));
   }
 });
 
 document.addEventListener('change', (ev) => {
-  const t = ev.target;
-  if (t.dataset.maneDaily) { state.maneDaily[t.dataset.maneDaily] = t.value; render(); }
-  else if (t.id === 'maneCarrySelect') { state.maneCarry = t.value; render(); }
-  else if (t.id === 'fbVersionSelect') {
-    state.fbVersionId = t.value;
+  const target = ev.target;
+  if (target.dataset.maneDaily) { state.maneDaily[target.dataset.maneDaily] = target.value; render(); }
+  else if (target.id === 'maneCarrySelect') { state.maneCarry = target.value; render(); }
+  else if (target.id === 'fbVersionSelect') {
+    state.fbVersionId = target.value;
     state.fbStageId = standardStages(state.fbVersionId)[0]?.id || '';
     state.fbCarry = '';
     render();
   }
-  else if (t.id === 'fbCarrySelect') { state.fbCarry = t.value; render(); }
-  else if (t.id === 'fbFormVersion') {
+  else if (target.id === 'fbCarrySelect') { state.fbCarry = target.value; render(); }
+  else if (target.id === 'fbFormVersion') {
     const sel = $('#fbFormStage');
     if (sel) {
-      sel.innerHTML = fbStageOptionsHtml(t.value);
-      const detectedNo = Number(t.form?.dataset.ocrStageNumber);
-      const detectedStage = standardStages(t.value).find((stage) => stage.stage_no === detectedNo);
+      sel.innerHTML = fbStageOptionsHtml(target.value);
+      const detectedNo = Number(target.form?.dataset.ocrStageNumber);
+      const detectedStage = standardStages(target.value).find((stage) => stage.stage_no === detectedNo);
       if (detectedStage) sel.value = detectedStage.id;
     }
   }
-  else if (t.id === 'fbFormGroup' || t.id === 'feGroup') {
-    const box = t.form?.querySelector('.resonance-choice');
+  else if (target.id === 'fbFormGroup' || target.id === 'feGroup') {
+    const box = target.form?.querySelector('.resonance-choice');
     const cb = box?.querySelector('input[name="resonanceTen"]');
-    const isZero = t.value === 'zero';
+    const isZero = target.value === 'zero';
     if (box) box.hidden = !isZero;
     if (cb) { cb.disabled = !isZero; if (!isZero) cb.checked = false; }
   }
-  const draftForm = t.closest?.('#maneSubmitForm, #fbSubmitForm');
-  if (draftForm && t.type !== 'file') saveSubmitDraftFromForm(draftForm);
+  const draftForm = target.closest?.('#maneSubmitForm, #fbSubmitForm');
+  if (draftForm && target.type !== 'file') saveSubmitDraftFromForm(draftForm);
 });
 
+function rerenderKeepingSearchFocus(inputId, nextValue, pos) {
+  const sx = window.scrollX;
+  const sy = window.scrollY;
+  if (inputId === 'maneSearchInput') state.maneQuery = nextValue;
+  else state.fbQuery = nextValue;
+  render();
+  const el = document.getElementById(inputId);
+  if (el) {
+    try { el.focus({ preventScroll: true }); } catch { el.focus(); }
+    try { el.setSelectionRange(pos, pos); } catch {}
+  }
+  if (window.scrollX !== sx || window.scrollY !== sy) {
+    window.scrollTo(sx, sy);
+  }
+}
+
 document.addEventListener('input', (ev) => {
-  const t = ev.target;
-  if (t.id === 'maneSearchInput') {
-    if (ev.isComposing || state.maneQuery === t.value) return;
-    const pos = t.selectionStart;
-    state.maneQuery = t.value;
-    render();
-    const el = $('#maneSearchInput');
-    if (el) { el.focus(); el.setSelectionRange(pos, pos); }
-  } else if (t.id === 'fbSearchInput') {
-    if (ev.isComposing || state.fbQuery === t.value) return;
-    const pos = t.selectionStart;
-    state.fbQuery = t.value;
-    render();
-    const el = $('#fbSearchInput');
-    if (el) { el.focus(); el.setSelectionRange(pos, pos); }
-  } else if (t.dataset?.resSlot !== undefined) {
-    modalBuildState.resonanceCodes[Number(t.dataset.resSlot)] = t.value;
-    const sf = t.closest?.('#maneSubmitForm, #fbSubmitForm');
+  const target = ev.target;
+  if (target.id === 'maneSearchInput') {
+    if (ev.isComposing || state.maneQuery === target.value) return;
+    rerenderKeepingSearchFocus('maneSearchInput', target.value, target.selectionStart);
+  } else if (target.id === 'fbSearchInput') {
+    if (ev.isComposing || state.fbQuery === target.value) return;
+    rerenderKeepingSearchFocus('fbSearchInput', target.value, target.selectionStart);
+  } else if (target.dataset?.resSlot !== undefined) {
+    modalBuildState.resonanceCodes[Number(target.dataset.resSlot)] = target.value;
+    const sf = target.closest?.('#maneSubmitForm, #fbSubmitForm');
     if (sf) saveSubmitDraftFromForm(sf);
-  } else if (t.id === 'charPickerSearch') {
-    if (!ev.isComposing && charPickerState.query !== t.value) {
-      charPickerState.query = t.value;
+  } else if (target.id === 'charPickerSearch') {
+    if (!ev.isComposing && charPickerState.query !== target.value) {
+      charPickerState.query = target.value;
       refreshCharPickerResults();
     }
-  } else if (t.id === 'psyPickerSearch') {
-    if (!ev.isComposing && psyPickerState.query !== t.value) {
-      psyPickerState.query = t.value;
+  } else if (target.id === 'psyPickerSearch') {
+    if (!ev.isComposing && psyPickerState.query !== target.value) {
+      psyPickerState.query = target.value;
       refreshPsychubePickerResults();
     }
   } else {
-    const draftForm = t.closest?.('#maneSubmitForm, #fbSubmitForm');
-    if (draftForm && t.type !== 'file') saveSubmitDraftFromForm(draftForm);
+    const draftForm = target.closest?.('#maneSubmitForm, #fbSubmitForm');
+    if (draftForm && target.type !== 'file') saveSubmitDraftFromForm(draftForm);
   }
 });
 
@@ -5414,17 +7992,9 @@ document.addEventListener('compositionend', (ev) => {
     psyPickerState.query = input.value;
     refreshPsychubePickerResults();
   } else if (input.id === 'maneSearchInput' && state.maneQuery !== input.value) {
-    const pos = input.selectionStart;
-    state.maneQuery = input.value;
-    render();
-    const el = $('#maneSearchInput');
-    if (el) { el.focus(); el.setSelectionRange(pos, pos); }
+    rerenderKeepingSearchFocus('maneSearchInput', input.value, input.selectionStart);
   } else if (input.id === 'fbSearchInput' && state.fbQuery !== input.value) {
-    const pos = input.selectionStart;
-    state.fbQuery = input.value;
-    render();
-    const el = $('#fbSearchInput');
-    if (el) { el.focus(); el.setSelectionRange(pos, pos); }
+    rerenderKeepingSearchFocus('fbSearchInput', input.value, input.selectionStart);
   }
 });
 
@@ -5442,22 +8012,22 @@ document.addEventListener('submit', async (ev) => {
       await handleManeSubmit(form);
     } else if (form.id === 'maneExportForm') {
       await submitManeExport(form);
-    } else if (form.id === 'maneEditForm' && state.isAdmin) {
+    } else if (form.id === 'maneEditForm' && state.isAdmin && sb) {
       const patch = readManeFields(new FormData(form), { forEdit: true });
       let updated;
       try {
         updated = await checked(sb.from('mane_entries').update(patch).eq('id', form.dataset.id).eq('updated_at', form.dataset.revision).select('id'));
       } catch (err) {
         if (isMissingBuildColumnError(err)) {
-          throw new Error('线上数据库尚未添加心相/共鸣码存储列，请先运行配套迁移 SQL。');
+          throw new Error(L('Database has not enabled Psychube/Resonance columns yet.', '线上数据库尚未添加心相/共鸣码存储列，请先运行配套迁移 SQL。'));
         }
         throw err;
       }
-      if (!updated.length) throw new Error('成绩已被其他管理员更新，请重新打开。');
-      await finishReview(dialog, 'mane', form.dataset.status, '鬃毛成绩已保存。', {
+      if (!updated.length) throw new Error(L('Record was updated by another moderator.', '成绩已被其他管理员更新，请重新打开。'));
+      await finishReview(dialog, 'mane', form.dataset.status, t('toastSaved'), {
         changedRankings: form.dataset.status === 'approved'
       });
-    } else if (form.id === 'maneMapForm' && state.isAdmin) {
+    } else if (form.id === 'maneMapForm' && state.isAdmin && sb) {
       const fd = new FormData(form);
       await checked(sb.from('mane_maps').insert({
         name: String(fd.get('name')).trim(),
@@ -5467,11 +8037,12 @@ document.addEventListener('submit', async (ev) => {
       }));
       await loadAllData();
       await openManeMapsAdmin();
-      toast('首领地图已新增。');
+      toast(t('toastSaved'));
     } else if (form.id === 'fbGuestForm') {
       const name = String(new FormData(form).get('name') || '').trim();
-      if (name.length < 2 || name.length > 24) throw new Error('昵称须为 2–24 字。');
+      if (name.length < 2 || name.length > 24) throw new Error(t('errPlayerRequired'));
       startingGuest = true;
+      await ensureSupabaseClient();
       let user = state.user;
       if (!user) {
         const res = await checked(sb.auth.signInAnonymously());
@@ -5483,15 +8054,15 @@ document.addEventListener('submit', async (ev) => {
       openFbSubmitModal();
     } else if (form.id === 'profileForm') {
       const name = String(new FormData(form).get('name') || '').trim();
-      if (!state.user || name.length < 2 || name.length > 24) throw new Error('昵称须为 2–24 字。');
+      if (!state.user || name.length < 2 || name.length > 24) throw new Error(t('errPlayerRequired'));
       await checked(sb.from('profiles').upsert({ id: state.user.id, display_name: name }, { onConflict: 'id' }));
       await syncAuth();
       closeModal();
       if (form.dataset.forFb === 'true') openFbSubmitModal();
-      else toast('展示昵称已保存。');
+      else toast(t('toastSaved'));
     } else if (form.id === 'fbSubmitForm') {
       await handleFbSubmit(form);
-    } else if (form.id === 'fbEditForm' && state.isAdmin) {
+    } else if (form.id === 'fbEditForm' && state.isAdmin && sb) {
       const fd = new FormData(form);
       const built = readTeamBuilderSubmission();
       const link = parseHttpUrl(fd.get('url')) || null;
@@ -5515,21 +8086,21 @@ document.addEventListener('submit', async (ev) => {
       } catch (err) {
         if (isMissingBuildColumnError(err) || /update_submission_builds|PGRST202/i.test(`${err?.code || ''} ${err?.message || ''}`)) {
           if (built.hasAny) {
-            throw new Error('基础成绩已保存，但线上数据库尚未运行 016_psychubes.sql，请先运行配套迁移 SQL。');
+            throw new Error(L('Core record saved, but Psychube/Resonance DB migration is not installed yet.', '基础成绩已保存，但线上数据库尚未运行心相迁移 SQL。'));
           }
         } else {
           throw err;
         }
       }
-      await finishReview(dialog, 'flashback', form.dataset.tab, '焦点闪回成绩已保存。', {
+      await finishReview(dialog, 'flashback', form.dataset.tab, t('toastSaved'), {
         changedRankings: form.dataset.tab === 'approved'
       });
-    } else if (form.id === 'fbVersionForm' && state.isAdmin) {
+    } else if (form.id === 'fbVersionForm' && state.isAdmin && sb) {
       const fd = new FormData(form);
       const code = String(fd.get('code') || '').trim();
       const label = String(fd.get('label') || '').trim();
       const names = [1, 2, 3].map((i) => String(fd.get(`stage${i}`) || '').trim());
-      if (!code || !label || names.some((n) => !n)) throw new Error('请填写完整版本与三个关卡名称。');
+      if (!code || !label || names.some((n) => !n)) throw new Error(L('Please fill in cycle code, label, and all 3 stages.', '请填写完整版本与三个关卡名称。'));
       const vid = await checked(sb.rpc('save_version', {
         p_version_id: form.dataset.id || null,
         p_code: code,
@@ -5541,18 +8112,19 @@ document.addEventListener('submit', async (ev) => {
       state.fbStageId = '';
       await loadAllData();
       openFbVersionManager();
-      toast('版本与关卡归属已保存。');
+      toast(t('toastSaved'));
     } else if (form.id === 'adminLoginForm') {
       const email = String(new FormData(form).get('email') || '').trim();
+      await ensureSupabaseClient();
       await checked(sb.auth.signInWithOtp({
         email,
         options: { emailRedirectTo: new URL('./', location.href).href }
       }));
       closeModal();
-      toast('登录邮件已发送，请在同一浏览器查收并打开链接。');
+      toast(L('Magic sign-in link sent. Open it in this browser to sign in.', '登录邮件已发送，请在同一浏览器查收并打开链接。'));
     }
   } catch (err) {
-    toast(err.message || '操作失败，请重试。');
+    toast(err.message || L('Operation failed. Please try again.', '操作失败，请重试。'));
   } finally {
     startingGuest = false;
     if (submitBtn?.isConnected) submitBtn.disabled = false;
@@ -5561,10 +8133,19 @@ document.addEventListener('submit', async (ev) => {
 
 document.addEventListener('keydown', (ev) => {
   if (ev.key === 'Escape' && !ev.isComposing) {
-    if ($('#proofLightboxOverlay')) closeProofLightbox();
+    if (state.glossaryOpen) closeGlossaryPopover();
+    else if ($('#proofLightboxOverlay')) closeProofLightbox();
     else if (charPickerState.open) closeCharPicker();
     else if (psyPickerState.open) closePsychubePicker();
     else closeModal();
+    return;
+  }
+  if ((ev.key === 'Enter' || ev.key === ' ') && !ev.isComposing) {
+    const interactive = ev.target?.closest?.('[role="button"][data-open-char], [role="button"][data-open-psy], [role="button"][data-open-player]');
+    if (interactive) {
+      ev.preventDefault();
+      interactive.click();
+    }
   }
 });
 
@@ -5579,7 +8160,6 @@ document.addEventListener('click', (ev) => {
   if (id === 'charPickerOverlay') closeCharPicker();
   else if (id === 'psyPickerOverlay') closePsychubePicker();
   else if (id === 'modalOverlay') {
-    // 投稿/编辑等含表单弹窗禁止点击空白遮罩误关，仅可通过右上角 × 或「取消」关闭
     if ($('#modalOverlay form')) return;
     closeModal();
   }
@@ -5590,35 +8170,16 @@ window.addEventListener('hashchange', () => {
   render();
 });
 
-/* ==================== 启动初始化 ==================== */
+/* ==================== Offline-First Bootstrap ==================== */
 async function bootstrap() {
+  initLang();
   readHash();
+  hydrateFromOfflineSnapshot();
   render();
 
   const cfg = window.LEADERBOARD_CONFIG;
-  if (!cfg?.supabaseUrl || !cfg?.supabaseAnonKey) {
-    state.loading = false;
-    state.errorNotice = '缺少 config.js 后端配置。';
-    render();
-    return;
-  }
-
-  try {
-    const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm');
-    sb = createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
-    await Promise.all([loadAllData(), syncAuth()]);
-    if (!authBound) {
-      authBound = true;
-      sb.auth.onAuthStateChange((_ev, nextSession) => {
-        setTimeout(() => syncAuth(nextSession).catch(() => {}), 0);
-      });
-    }
-  } catch (err) {
-    console.error(err);
-    state.loading = false;
-    state.connected = false;
-    state.errorNotice = '无法加载榜单客户端模块，请检查网络后刷新。';
-    render();
+  if (cfg?.offlineFirst === false && cfg?.supabaseUrl && cfg?.supabaseAnonKey) {
+    await syncLiveArchive({ silent: true });
   }
 }
 

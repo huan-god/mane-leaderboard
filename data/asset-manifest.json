@@ -1,0 +1,419 @@
+{
+  "generatedAt": "2026-11-27T01:01:16.372Z",
+  "fonts": [
+    {
+      "path": "assets/fonts/r1999-en-official.ttf",
+      "size": 359048,
+      "magicType": "TTF",
+      "sourceUrl": "https://reverse1999.bluepoch.com/event/discordleaderboard/assets/enFont-HIZd4K6A.ttf"
+    },
+    {
+      "path": "assets/fonts/cormorant-garamond-latin-400-normal.woff2",
+      "size": 22876,
+      "magicType": "WOFF2",
+      "sourceUrl": "https://cdn.jsdelivr.net/npm/@fontsource/cormorant-garamond@5.3.0/files/cormorant-garamond-latin-400-normal.woff2"
+    },
+    {
+      "path": "assets/fonts/cormorant-garamond-latin-400-italic.woff2",
+      "size": 23660,
+      "magicType": "WOFF2",
+      "sourceUrl": "https://cdn.jsdelivr.net/npm/@fontsource/cormorant-garamond@5.3.0/files/cormorant-garamond-latin-400-italic.woff2"
+    },
+    {
+      "path": "assets/fonts/cormorant-garamond-latin-600-normal.woff2",
+      "size": 23396,
+      "magicType": "WOFF2",
+      "sourceUrl": "https://cdn.jsdelivr.net/npm/@fontsource/cormorant-garamond@5.3.0/files/cormorant-garamond-latin-600-normal.woff2"
+    },
+    {
+      "path": "assets/fonts/cormorant-garamond-latin-600-italic.woff2",
+      "size": 23784,
+      "magicType": "WOFF2",
+      "sourceUrl": "https://cdn.jsdelivr.net/npm/@fontsource/cormorant-garamond@5.3.0/files/cormorant-garamond-latin-600-italic.woff2"
+    },
+    {
+      "path": "assets/fonts/cormorant-garamond-latin-700-normal.woff2",
+      "size": 22340,
+      "magicType": "WOFF2",
+      "sourceUrl": "https://cdn.jsdelivr.net/npm/@fontsource/cormorant-garamond@5.3.0/files/cormorant-garamond-latin-700-normal.woff2"
+    },
+    {
+      "path": "assets/fonts/cinzel-latin-600-normal.woff2",
+      "size": 15204,
+      "magicType": "WOFF2",
+      "sourceUrl": "https://cdn.jsdelivr.net/npm/@fontsource/cinzel@5.3.0/files/cinzel-latin-600-normal.woff2"
+    },
+    {
+      "path": "assets/fonts/cinzel-latin-700-normal.woff2",
+      "size": 15184,
+      "magicType": "WOFF2",
+      "sourceUrl": "https://cdn.jsdelivr.net/npm/@fontsource/cinzel@5.3.0/files/cinzel-latin-700-normal.woff2"
+    },
+    {
+      "path": "assets/fonts/inter-latin-400-normal.woff2",
+      "size": 23664,
+      "magicType": "WOFF2",
+      "sourceUrl": "https://cdn.jsdelivr.net/npm/@fontsource/inter@5.3.0/files/inter-latin-400-normal.woff2"
+    },
+    {
+      "path": "assets/fonts/inter-latin-500-normal.woff2",
+      "size": 24272,
+      "magicType": "WOFF2",
+      "sourceUrl": "https://cdn.jsdelivr.net/npm/@fontsource/inter@5.3.0/files/inter-latin-500-normal.woff2"
+    },
+    {
+      "path": "assets/fonts/inter-latin-600-normal.woff2",
+      "size": 24452,
+      "magicType": "WOFF2",
+      "sourceUrl": "https://cdn.jsdelivr.net/npm/@fontsource/inter@5.3.0/files/inter-latin-600-normal.woff2"
+    },
+    {
+      "path": "assets/fonts/uttu-regular-400.woff2",
+      "size": 86408,
+      "magicType": "WOFF2",
+      "sourceUrl": "https://uttu.merui.net/_astro/regular-webfont.DcZr9d_2.woff2"
+    },
+    {
+      "path": "assets/fonts/uttu-regular-700.woff2",
+      "size": 75424,
+      "magicType": "WOFF2",
+      "sourceUrl": "https://uttu.merui.net/_astro/regular-bold.DI6hU6-R.woff2"
+    },
+    {
+      "path": "assets/fonts/uttu-regular-400-italic.woff2",
+      "size": 92944,
+      "magicType": "WOFF2",
+      "sourceUrl": "https://uttu.merui.net/_astro/regular-italic.CeDXPxbk.woff2"
+    },
+    {
+      "path": "assets/fonts/uttu-regular-700-italic.woff2",
+      "size": 74644,
+      "magicType": "WOFF2",
+      "sourceUrl": "https://uttu.merui.net/_astro/regular-bolditalic.CPlSbgnS.woff2"
+    },
+    {
+      "path": "assets/fonts/uttu-playfair-display-latin.woff2",
+      "size": 38372,
+      "magicType": "WOFF2",
+      "sourceUrl": "https://uttu.merui.net/_astro/playfair-display-latin-wght-normal.BGlevZWC.woff2"
+    },
+    {
+      "path": "assets/fonts/uttu-cinzel-decorative-latin.woff2",
+      "size": 14416,
+      "magicType": "WOFF2",
+      "sourceUrl": "https://uttu.merui.net/_astro/cinzel-decorative-latin-400-normal.C3uAaiWr.woff2"
+    },
+    {
+      "path": "assets/fonts/uttu-typewriter.woff2",
+      "size": 28544,
+      "magicType": "WOFF2",
+      "sourceUrl": "https://uttu.merui.net/_astro/xtypewriter-webfont.9alQmcVz.woff2"
+    },
+    {
+      "path": "assets/fonts/uttu-work-sans-latin.woff2",
+      "size": 50668,
+      "magicType": "WOFF2",
+      "sourceUrl": "https://uttu.merui.net/_astro/work-sans-latin-wght-normal.CkJCGd27.woff2"
+    }
+  ],
+  "official": [
+    {
+      "path": "assets/official/discord-bg.jpg",
+      "size": 1090177,
+      "magicType": "JPEG",
+      "sourceUrl": "https://reverse1999.bluepoch.com/event/discordleaderboard/assets/pc-bg-BY2nvkzo.jpg"
+    },
+    {
+      "path": "assets/official/share-card-frame.png",
+      "size": 496162,
+      "magicType": "PNG",
+      "sourceUrl": "https://reverse1999.bluepoch.com/event/discordleaderboard/assets/%E5%88%86%E4%BA%AB%E5%8D%A1-DCwrrkuJ.png"
+    },
+    {
+      "path": "assets/official/content-bg.png",
+      "size": 483997,
+      "magicType": "PNG",
+      "sourceUrl": "https://reverse1999.bluepoch.com/event/discordleaderboard/assets/content-bg-BlP-Bxxn.png"
+    },
+    {
+      "path": "assets/official/ranking-bg.png",
+      "size": 150509,
+      "magicType": "PNG",
+      "sourceUrl": "https://reverse1999.bluepoch.com/event/discordleaderboard/assets/ranking-bg-BuMrWXjm.png"
+    },
+    {
+      "path": "assets/official/rank-row-bg.png",
+      "size": 133928,
+      "magicType": "PNG",
+      "sourceUrl": "https://reverse1999.bluepoch.com/event/discordleaderboard/assets/%E6%8E%92%E5%90%8D%E5%BA%95%E5%9B%BE-6Sspk834.png"
+    },
+    {
+      "path": "assets/official/ranking-1.png",
+      "size": 4580,
+      "magicType": "PNG",
+      "sourceUrl": "https://reverse1999.bluepoch.com/event/discordleaderboard/assets/ranking-1-BNpfpTv5.png"
+    },
+    {
+      "path": "assets/official/ranking-2.png",
+      "size": 4681,
+      "magicType": "PNG",
+      "sourceUrl": "https://reverse1999.bluepoch.com/event/discordleaderboard/assets/ranking-2-B8PnCvgG.png"
+    },
+    {
+      "path": "assets/official/ranking-3.png",
+      "size": 4708,
+      "magicType": "PNG",
+      "sourceUrl": "https://reverse1999.bluepoch.com/event/discordleaderboard/assets/ranking-3-DlHKk1jj.png"
+    },
+    {
+      "path": "assets/official/tab.png",
+      "size": 7177,
+      "magicType": "PNG",
+      "sourceUrl": "https://reverse1999.bluepoch.com/event/discordleaderboard/assets/tab-BqYIg5KI.png"
+    },
+    {
+      "path": "assets/official/tab-active.png",
+      "size": 7412,
+      "magicType": "PNG",
+      "sourceUrl": "https://reverse1999.bluepoch.com/event/discordleaderboard/assets/tab-act-58z6SmAk.png"
+    },
+    {
+      "path": "assets/official/selected-frame.png",
+      "size": 37897,
+      "magicType": "PNG",
+      "sourceUrl": "https://reverse1999.bluepoch.com/event/discordleaderboard/assets/%E9%80%89%E4%B8%AD-DbsrYPrv.png"
+    },
+    {
+      "path": "assets/official/btn-bg.png",
+      "size": 29021,
+      "magicType": "PNG",
+      "sourceUrl": "https://reverse1999.bluepoch.com/event/discordleaderboard/assets/btn-bg-C3IV_mrb.png"
+    },
+    {
+      "path": "assets/official/date-frame.png",
+      "size": 7801,
+      "magicType": "PNG",
+      "sourceUrl": "https://reverse1999.bluepoch.com/event/discordleaderboard/assets/date-B05NcfVD.png"
+    },
+    {
+      "path": "assets/official/avatar-bg.png",
+      "size": 4771,
+      "magicType": "PNG",
+      "sourceUrl": "https://reverse1999.bluepoch.com/event/discordleaderboard/assets/avatar-bg-BEgSunbg.png"
+    },
+    {
+      "path": "assets/official/pop-light.png",
+      "size": 35041,
+      "magicType": "PNG",
+      "sourceUrl": "https://reverse1999.bluepoch.com/event/discordleaderboard/assets/pop-light-w07cqLQh.png"
+    },
+    {
+      "path": "assets/official/pop-ranking-en.png",
+      "size": 26256,
+      "magicType": "PNG",
+      "sourceUrl": "https://reverse1999.bluepoch.com/event/discordleaderboard/assets/pop-ranking-en-CVY71MiE.png"
+    },
+    {
+      "path": "assets/official/logo-en.png",
+      "size": 4265,
+      "magicType": "PNG",
+      "sourceUrl": "https://reverse1999.bluepoch.com/event/discordleaderboard/assets/logo-en-DPX_7WQ2.png"
+    },
+    {
+      "path": "assets/official/bottom-logo-en.png",
+      "size": 22629,
+      "magicType": "PNG",
+      "sourceUrl": "https://reverse1999.bluepoch.com/event/discordleaderboard/assets/bottom-logo-en-jnaIc5ZO.png"
+    },
+    {
+      "path": "assets/official/event-title-en.png",
+      "size": 63586,
+      "magicType": "PNG",
+      "sourceUrl": "https://reverse1999.bluepoch.com/event/discordleaderboard/assets/%E6%B4%BB%E5%8A%A8%E5%90%8Den-D_SPmA11.png"
+    },
+    {
+      "path": "assets/official/ornament-left-en.png",
+      "size": 98864,
+      "magicType": "PNG",
+      "sourceUrl": "https://reverse1999.bluepoch.com/event/discordleaderboard/assets/%E5%B7%A6en-D1Mz5Fkt.png"
+    },
+    {
+      "path": "assets/official/ornament-right-en.png",
+      "size": 112964,
+      "magicType": "PNG",
+      "sourceUrl": "https://reverse1999.bluepoch.com/event/discordleaderboard/assets/%E5%8F%B3en-CCwr4t0h.png"
+    }
+  ],
+  "grades": [
+    {
+      "path": "assets/grades/global_c.png",
+      "size": 169840,
+      "magicType": "PNG",
+      "sourceUrl": "https://static.wikia.nocookie.net/reverse1999/images/c/cb/Mane%27s_Bulletin_C_Icon.png/revision/latest?cb=20260828171518&format=original"
+    },
+    {
+      "path": "assets/grades/global_b.png",
+      "size": 211299,
+      "magicType": "PNG",
+      "sourceUrl": "https://static.wikia.nocookie.net/reverse1999/images/3/3b/Mane%27s_Bulletin_B_Icon.png/revision/latest?cb=20260828171542&format=original"
+    },
+    {
+      "path": "assets/grades/global_a.png",
+      "size": 262355,
+      "magicType": "PNG",
+      "sourceUrl": "https://static.wikia.nocookie.net/reverse1999/images/1/12/Mane%27s_Bulletin_A_Icon.png/revision/latest?cb=20260828171613&format=original"
+    },
+    {
+      "path": "assets/grades/global_s.png",
+      "size": 264719,
+      "magicType": "PNG",
+      "sourceUrl": "https://static.wikia.nocookie.net/reverse1999/images/2/23/Mane%27s_Bulletin_S_Icon.png/revision/latest?cb=20260828171708&format=original"
+    },
+    {
+      "path": "assets/grades/global_ss.png",
+      "size": 276844,
+      "magicType": "PNG",
+      "sourceUrl": "https://static.wikia.nocookie.net/reverse1999/images/f/f2/Mane%27s_Bulletin_SS_Icon.png/revision/latest?cb=20260828171734&format=original"
+    },
+    {
+      "path": "assets/grades/global_sss1.png",
+      "size": 285197,
+      "magicType": "PNG",
+      "sourceUrl": "https://static.wikia.nocookie.net/reverse1999/images/d/d8/Mane%27s_Bulletin_SSS1_Icon.png/revision/latest?cb=20260828171808&format=original"
+    },
+    {
+      "path": "assets/grades/global_sss2.png",
+      "size": 265378,
+      "magicType": "PNG",
+      "sourceUrl": "https://static.wikia.nocookie.net/reverse1999/images/6/64/Mane%27s_Bulletin_SSS2_Icon.png/revision/latest?cb=20260828171833&format=original"
+    },
+    {
+      "path": "assets/grades/global_sss3.png",
+      "size": 275686,
+      "magicType": "PNG",
+      "sourceUrl": "https://static.wikia.nocookie.net/reverse1999/images/2/2c/Mane%27s_Bulletin_SSS3_Icon.png/revision/latest?cb=20260828171926&format=original"
+    },
+    {
+      "path": "assets/grades/global_sss4.png",
+      "size": 290463,
+      "magicType": "PNG",
+      "sourceUrl": "https://static.wikia.nocookie.net/reverse1999/images/b/b3/Mane%27s_Bulletin_SSS4_Icon.png/revision/latest?cb=20260828171954&format=original"
+    }
+  ],
+  "bosses": [
+    {
+      "path": "assets/bosses/fb_stage1.png",
+      "size": 880647,
+      "magicType": "PNG",
+      "sourceUrl": "https://static.wikia.nocookie.net/reverse1999/images/c/ca/Charybdis.png/revision/latest/scale-to-width-down/1024?cb=20261121132749&format=original"
+    },
+    {
+      "path": "assets/bosses/fb_stage2.png",
+      "size": 620768,
+      "magicType": "PNG",
+      "sourceUrl": "https://static.wikia.nocookie.net/reverse1999/images/f/f7/Wild_Scylla.png/revision/latest/scale-to-width-down/1024?cb=20261121132928&format=original"
+    },
+    {
+      "path": "assets/bosses/fb_stage3.png",
+      "size": 839542,
+      "magicType": "PNG",
+      "sourceUrl": "https://static.wikia.nocookie.net/reverse1999/images/b/be/Golden-Fleeced_Ram.png/revision/latest/scale-to-width-down/1024?cb=20261121133346&format=original"
+    },
+    {
+      "path": "assets/bosses/fb_hippocampus.png",
+      "size": 463030,
+      "magicType": "PNG",
+      "sourceUrl": "https://static.wikia.nocookie.net/reverse1999/images/d/db/Hippocampus.png/revision/latest/scale-to-width-down/1024?cb=20261121133153&format=original"
+    },
+    {
+      "path": "assets/bosses/fb_scylla.png",
+      "size": 805001,
+      "magicType": "PNG",
+      "sourceUrl": "https://static.wikia.nocookie.net/reverse1999/images/6/60/Scylla.png/revision/latest/scale-to-width-down/1024?cb=20261121132857&format=original"
+    },
+    {
+      "path": "assets/bosses/fb_charybdis_icon.png",
+      "size": 35499,
+      "magicType": "PNG",
+      "sourceUrl": "https://static.wikia.nocookie.net/reverse1999/images/a/a4/Charybdis_Enemy_Icon.png/revision/latest?cb=20261115070427&format=original"
+    },
+    {
+      "path": "assets/bosses/fb_hippocampus_icon.png",
+      "size": 35576,
+      "magicType": "PNG",
+      "sourceUrl": "https://static.wikia.nocookie.net/reverse1999/images/3/3c/Hippocampus_Enemy_Icon.png/revision/latest?cb=20261115070324&format=original"
+    },
+    {
+      "path": "assets/bosses/fb_scylla_icon.png",
+      "size": 33011,
+      "magicType": "PNG",
+      "sourceUrl": "https://static.wikia.nocookie.net/reverse1999/images/2/27/Scylla_Enemy_Icon.png/revision/latest?cb=20261115070304&format=original"
+    },
+    {
+      "path": "assets/bosses/fb_wild_scylla_icon.png",
+      "size": 33514,
+      "magicType": "PNG",
+      "sourceUrl": "https://static.wikia.nocookie.net/reverse1999/images/d/d8/Wild_Scylla_Enemy_Icon.png/revision/latest?cb=20261115070444&format=original"
+    },
+    {
+      "path": "assets/bosses/fb_golden_fleece_icon.png",
+      "size": 34939,
+      "magicType": "PNG",
+      "sourceUrl": "https://static.wikia.nocookie.net/reverse1999/images/b/bd/Golden-Fleeced_Ram_Enemy_Icon.png/revision/latest?cb=20261115070356&format=original"
+    },
+    {
+      "path": "assets/bosses/global_cocooned_lament_dossier.png",
+      "size": 102650,
+      "magicType": "PNG",
+      "sourceUrl": "https://static.wikia.nocookie.net/reverse1999/images/f/f5/The_Cocooned_Lament_Dossier.png/revision/latest?cb=20260828185647&format=original"
+    },
+    {
+      "path": "assets/bosses/global_captive_t1_dossier.png",
+      "size": 91263,
+      "magicType": "PNG",
+      "sourceUrl": "https://static.wikia.nocookie.net/reverse1999/images/6/6c/Captive_Of_Transcendentality_Type_1_Dossier.png.png/revision/latest?cb=20260828190102&format=original"
+    },
+    {
+      "path": "assets/bosses/global_captive_t2_dossier.png",
+      "size": 98578,
+      "magicType": "PNG",
+      "sourceUrl": "https://static.wikia.nocookie.net/reverse1999/images/0/0c/Captive_Of_Transcendentality_Type_2_Dossier.png/revision/latest?cb=20260828190144&format=original"
+    },
+    {
+      "path": "assets/bosses/global_distortion_of_faith_t1_dossier.png",
+      "size": 104091,
+      "magicType": "PNG",
+      "sourceUrl": "https://static.wikia.nocookie.net/reverse1999/images/e/ef/Distortion_of_Faith_Type_1_Dossier.png/revision/latest?cb=20260828185826&format=original"
+    },
+    {
+      "path": "assets/bosses/global_distortion_of_faith_t2_dossier.png",
+      "size": 108502,
+      "magicType": "PNG",
+      "sourceUrl": "https://static.wikia.nocookie.net/reverse1999/images/b/b1/Distortion_of_Faith_Type_2_Dossier.png.png/revision/latest?cb=20260828185921&format=original"
+    },
+    {
+      "path": "assets/bosses/global_insatiable_bloodsucker_dossier.png",
+      "size": 98708,
+      "magicType": "PNG",
+      "sourceUrl": "https://static.wikia.nocookie.net/reverse1999/images/0/07/Insatiable_Bloodsucker.png/revision/latest?cb=20260828190233&format=original"
+    },
+    {
+      "path": "assets/bosses/global_caterpillar_of_destruction_dossier.png",
+      "size": 89773,
+      "magicType": "PNG",
+      "sourceUrl": "https://static.wikia.nocookie.net/reverse1999/images/e/e4/Caterpillar_Of_Destruction_Dossier.png/revision/latest?cb=20260828190643&format=original"
+    },
+    {
+      "path": "assets/bosses/global_glory_days_manifest_dossier.png",
+      "size": 109936,
+      "magicType": "PNG",
+      "sourceUrl": "https://static.wikia.nocookie.net/reverse1999/images/1/1f/Glory_Days_Manifest_Dossier.png/revision/latest?cb=20260828190753&format=original"
+    },
+    {
+      "path": "assets/bosses/global_self_pitying_avenger_dossier.png",
+      "size": 140460,
+      "magicType": "PNG",
+      "sourceUrl": "https://static.wikia.nocookie.net/reverse1999/images/1/10/Self_Pitying_Avenger_Dossier.png/revision/latest?cb=20260828190332&format=original"
+    }
+  ]
+}
