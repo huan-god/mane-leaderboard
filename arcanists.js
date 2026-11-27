@@ -963,15 +963,15 @@ const BOSS_ASSETS = new Map([
   ["子弹的冬年", {"cn":"子弹的冬年","en":"The Bullet-Torn Winter","version":"4.0","edition":"Witness's Edition","editionTagEn":"v4.0 Anomaly Gallery","weakness":["star","beast"],"tags":["群体伤害","爆发伤害"],"tagsEn":["Mass DMG","Burst DMG"],"wiki":"https://res1999.huijiwiki.com/wiki/%E9%AC%83%E6%AF%9B%E9%82%AE%E6%8A%A5","wikiEn":"https://reverse1999.fandom.com/wiki/Mane%27s_Bulletin","thumb":"./assets/bosses/v4a0_boss1.webp","hero":"./assets/bosses/v4a0_boss1.webp","pos":"50% 22%"}],
   ["急性猩红症·Ⅱ型", {"cn":"急性猩红症·Ⅱ型","en":"Insatiable Bloodsucker Type II","version":"3.9","edition":"Witness's Edition","editionTagEn":"v3.9 Anomaly Gallery","weakness":["beast","plant","star","mineral"],"tags":["自然灵感","仪式解控"],"tagsEn":["Natural Afflatus","Ultimate Cleanse"],"wiki":"https://res1999.huijiwiki.com/wiki/%E9%AC%83%E6%AF%9B%E9%82%AE%E6%8A%A5","wikiEn":"https://reverse1999.fandom.com/wiki/Mane%27s_Bulletin","thumb":"./assets/bosses/v3a9_boss1.webp","hero":"./assets/bosses/v3a9_boss1.webp","pos":"50% 24%"}],
   ["太阳的宠臣", {"cn":"太阳的宠臣","en":"The Sun's Thrall","version":"3.8","edition":"Witness's Edition","editionTagEn":"v3.8 Anomaly Gallery","weakness":["star","mineral"],"tags":["治疗咒语","主动攻击"],"tagsEn":["Heal Incantation","Active Attack"],"wiki":"https://res1999.huijiwiki.com/wiki/%E9%AC%83%E6%AF%9B%E9%82%AE%E6%8A%A5","wikiEn":"https://reverse1999.fandom.com/wiki/Mane%27s_Bulletin","thumb":"./assets/bosses/v3a8_boss1.webp","hero":"./assets/bosses/v3a8_boss1.webp","pos":"50% 28%"}],
-  ["旧日的荣耀", {"cn":"旧日的荣耀","en":"Glory Days Manifest","version":"3.7","edition":"Witness's Edition","editionTagEn":"v3.7 Anomaly Gallery","weakness":["mineral","spirit"],"tags":["多增益叠层","爆发伤害"],"tagsEn":["1-target DMG","Burst DMG"],"wiki":"https://res1999.huijiwiki.com/wiki/%E9%AC%83%E6%AF%9B%E9%82%AE%E6%8A%A5","wikiEn":"https://reverse1999.fandom.com/wiki/Glory_Days_Manifest_(Enemy)","thumb":"./assets/bosses/v3a7_boss1.webp","hero":"./assets/bosses/v3a7_boss1.webp","dossier":"./assets/bosses/global_glory_days_manifest_dossier.png","pos":"50% 22%"}],
-  ["自我同情者", {"cn":"自我同情者","en":"The Self-Pitying Avenger","version":"S02","edition":"Witness's Edition","editionTagEn":"S02 Anomaly Gallery","weakness":["star","mineral"],"tags":["现实创伤","及时治疗"],"tagsEn":["Mass DMG","Instant Heal"],"wiki":"https://res1999.huijiwiki.com/wiki/%E9%AC%83%E6%AF%9B%E9%82%AE%E6%8A%A5","wikiEn":"https://reverse1999.fandom.com/wiki/The_Self-Pitying_Avenger_(Enemy)","thumb":"./assets/bosses/sp02_boss1.webp","hero":"./assets/bosses/sp02_boss1.webp","dossier":"./assets/bosses/global_self_pitying_avenger_dossier.png","pos":"50% 25%"}],
-  ["超限的囚徒·Ⅱ型", {"cn":"超限的囚徒·Ⅱ型","en":"Captive of Transcendentality Type II","version":"3.6","edition":"Witness's Edition","editionTagEn":"v3.6 Anomaly Gallery","weakness":["spirit","intellect"],"tags":["术阵仪式","单体爆发"],"tagsEn":["1-target DMG","Burst DMG"],"wiki":"https://res1999.huijiwiki.com/wiki/%E9%AC%83%E6%AF%9B%E9%82%AE%E6%8A%A5","wikiEn":"https://reverse1999.fandom.com/wiki/Captive_of_Transcendentality_Type_II_(Enemy)","thumb":"./assets/bosses/v3a6_boss1.webp","hero":"./assets/bosses/v3a6_boss1.webp","dossier":"./assets/bosses/global_captive_t2_dossier.png","pos":"50% 20%"}],
-  ["信仰的移位·Ⅱ型", {"cn":"信仰的移位·Ⅱ型","en":"Distortion of Faith Type II","version":"3.5","edition":"Witness's Edition","editionTagEn":"v3.5 Anomaly Gallery","weakness":["intellect","beast"],"tags":["术法输出","增益解崩"],"tagsEn":["Mass DMG","Debuff Incantation"],"wiki":"https://res1999.huijiwiki.com/wiki/%E9%AC%83%E6%AF%9B%E9%82%AE%E6%8A%A5","wikiEn":"https://reverse1999.fandom.com/wiki/Distortion_of_Faith_Type_II_(Enemy)","thumb":"./assets/bosses/v3a5_boss1.webp","hero":"./assets/bosses/v3a5_boss1.webp","dossier":"./assets/bosses/global_distortion_of_faith_t2_dossier.png","pos":"50% 24%"}],
-  ["毁灭的履带", {"cn":"毁灭的履带","en":"Caterpillar of Destruction","version":"3.4","edition":"Witness's Edition","editionTagEn":"v3.4 Anomaly Gallery","weakness":["plant","star"],"tags":["克制群攻","破甲暴露"],"tagsEn":["Mass DMG","Dispel Buff"],"wiki":"https://res1999.huijiwiki.com/wiki/%E9%AC%83%E6%AF%9B%E9%82%AE%E6%8A%A5","wikiEn":"https://reverse1999.fandom.com/wiki/Caterpillar_of_Destruction_(Enemy)","thumb":"./assets/bosses/v3a4_boss1.webp","hero":"./assets/bosses/v3a4_boss1.webp","dossier":"./assets/bosses/global_caterpillar_of_destruction_dossier.png","pos":"50% 35%"}],
-  ["急性猩红症", {"cn":"急性猩红症","en":"Insatiable Bloodsucker","version":"3.3","edition":"Witness's Edition","editionTagEn":"v3.3 Anomaly Gallery","weakness":["beast","spirit","intellect"],"tags":["群体伤害","仪式清debuff"],"tagsEn":["Mass DMG","Buff Incantation"],"wiki":"https://res1999.huijiwiki.com/wiki/%E9%AC%83%E6%AF%9B%E9%82%AE%E6%8A%A5","wikiEn":"https://reverse1999.fandom.com/wiki/Insatiable_Bloodsucker_(Enemy)","thumb":"./assets/bosses/v3a3_boss1.webp","hero":"./assets/bosses/v3a3_boss1.webp","dossier":"./assets/bosses/global_insatiable_bloodsucker_dossier.png","pos":"50% 28%"}],
-  ["超限的囚徒", {"cn":"超限的囚徒","en":"Captive of Transcendentality","version":"3.2","edition":"Witness's Edition","editionTagEn":"v3.2 Anomaly Gallery","weakness":["beast","intellect"],"tags":["单体追击","3回合仪式窗"],"tagsEn":["1-target DMG","Burst DMG"],"wiki":"https://res1999.huijiwiki.com/wiki/%E9%AC%83%E6%AF%9B%E9%82%AE%E6%8A%A5","wikiEn":"https://reverse1999.fandom.com/wiki/Captive_of_Transcendentality_(Enemy)","thumb":"./assets/bosses/v3a2_boss2.webp","hero":"./assets/bosses/v3a2_boss2.webp","dossier":"./assets/bosses/global_captive_t1_dossier.png","pos":"50% 20%"}],
-  ["蜕化的残响", {"cn":"蜕化的残响","en":"The Cocooned Lament","version":"3.2","edition":"Witness's Edition","editionTagEn":"v3.2 Anomaly Gallery","weakness":["mineral","beast"],"tags":["精神创伤","额外行动"],"tagsEn":["Mass DMG","Extra Action"],"wiki":"https://res1999.huijiwiki.com/wiki/%E9%AC%83%E6%AF%9B%E9%82%AE%E6%8A%A5","wikiEn":"https://reverse1999.fandom.com/wiki/The_Cocooned_Lament_(Enemy)","thumb":"./assets/bosses/v3a2_boss1.webp","hero":"./assets/bosses/v3a2_boss1.webp","dossier":"./assets/bosses/global_cocooned_lament_dossier.png","pos":"50% 30%"}],
-  ["信仰的移位", {"cn":"信仰的移位","en":"Distortion of Faith","version":"3.2","edition":"Witness's Edition","editionTagEn":"v3.2 Anomaly Gallery","weakness":["spirit","intellect"],"tags":["群体伤害","主动减益"],"tagsEn":["Mass DMG","Debuff Incantation"],"wiki":"https://res1999.huijiwiki.com/wiki/%E9%AC%83%E6%AF%9B%E9%82%AE%E6%8A%A5","wikiEn":"https://reverse1999.fandom.com/wiki/Distortion_of_Faith_(Enemy)","thumb":"./assets/bosses/v3a2_boss3.webp","hero":"./assets/bosses/v3a2_boss3.webp","dossier":"./assets/bosses/global_distortion_of_faith_t1_dossier.png","pos":"50% 24%"}]
+  ["旧日的荣耀", {"cn":"旧日的荣耀","en":"Glory Days Manifest","version":"3.7","edition":"Witness's Edition","editionTagEn":"v3.7 Anomaly Gallery","weakness":["mineral","spirit"],"tags":["多增益叠层","爆发伤害"],"tagsEn":["1-target DMG","Burst DMG"],"wiki":"https://res1999.huijiwiki.com/wiki/%E9%AC%83%E6%AF%9B%E9%82%AE%E6%8A%A5","wikiEn":"https://reverse1999.fandom.com/wiki/Glory_Days_Manifest_(Enemy)","thumb":"./assets/bosses/v3a7_boss1.webp","hero":"./assets/bosses/v3a7_boss1.webp","dossier":"./assets/bosses/global_glory_days_manifest_dossier.webp","pos":"50% 22%"}],
+  ["自我同情者", {"cn":"自我同情者","en":"The Self-Pitying Avenger","version":"S02","edition":"Witness's Edition","editionTagEn":"S02 Anomaly Gallery","weakness":["star","mineral"],"tags":["现实创伤","及时治疗"],"tagsEn":["Mass DMG","Instant Heal"],"wiki":"https://res1999.huijiwiki.com/wiki/%E9%AC%83%E6%AF%9B%E9%82%AE%E6%8A%A5","wikiEn":"https://reverse1999.fandom.com/wiki/The_Self-Pitying_Avenger_(Enemy)","thumb":"./assets/bosses/sp02_boss1.webp","hero":"./assets/bosses/sp02_boss1.webp","dossier":"./assets/bosses/global_self_pitying_avenger_dossier.webp","pos":"50% 25%"}],
+  ["超限的囚徒·Ⅱ型", {"cn":"超限的囚徒·Ⅱ型","en":"Captive of Transcendentality Type II","version":"3.6","edition":"Witness's Edition","editionTagEn":"v3.6 Anomaly Gallery","weakness":["spirit","intellect"],"tags":["术阵仪式","单体爆发"],"tagsEn":["1-target DMG","Burst DMG"],"wiki":"https://res1999.huijiwiki.com/wiki/%E9%AC%83%E6%AF%9B%E9%82%AE%E6%8A%A5","wikiEn":"https://reverse1999.fandom.com/wiki/Captive_of_Transcendentality_Type_II_(Enemy)","thumb":"./assets/bosses/v3a6_boss1.webp","hero":"./assets/bosses/v3a6_boss1.webp","dossier":"./assets/bosses/global_captive_t2_dossier.webp","pos":"50% 20%"}],
+  ["信仰的移位·Ⅱ型", {"cn":"信仰的移位·Ⅱ型","en":"Distortion of Faith Type II","version":"3.5","edition":"Witness's Edition","editionTagEn":"v3.5 Anomaly Gallery","weakness":["intellect","beast"],"tags":["术法输出","增益解崩"],"tagsEn":["Mass DMG","Debuff Incantation"],"wiki":"https://res1999.huijiwiki.com/wiki/%E9%AC%83%E6%AF%9B%E9%82%AE%E6%8A%A5","wikiEn":"https://reverse1999.fandom.com/wiki/Distortion_of_Faith_Type_II_(Enemy)","thumb":"./assets/bosses/v3a5_boss1.webp","hero":"./assets/bosses/v3a5_boss1.webp","dossier":"./assets/bosses/global_distortion_of_faith_t2_dossier.webp","pos":"50% 24%"}],
+  ["毁灭的履带", {"cn":"毁灭的履带","en":"Caterpillar of Destruction","version":"3.4","edition":"Witness's Edition","editionTagEn":"v3.4 Anomaly Gallery","weakness":["plant","star"],"tags":["克制群攻","破甲暴露"],"tagsEn":["Mass DMG","Dispel Buff"],"wiki":"https://res1999.huijiwiki.com/wiki/%E9%AC%83%E6%AF%9B%E9%82%AE%E6%8A%A5","wikiEn":"https://reverse1999.fandom.com/wiki/Caterpillar_of_Destruction_(Enemy)","thumb":"./assets/bosses/v3a4_boss1.webp","hero":"./assets/bosses/v3a4_boss1.webp","dossier":"./assets/bosses/global_caterpillar_of_destruction_dossier.webp","pos":"50% 35%"}],
+  ["急性猩红症", {"cn":"急性猩红症","en":"Insatiable Bloodsucker","version":"3.3","edition":"Witness's Edition","editionTagEn":"v3.3 Anomaly Gallery","weakness":["beast","spirit","intellect"],"tags":["群体伤害","仪式清debuff"],"tagsEn":["Mass DMG","Buff Incantation"],"wiki":"https://res1999.huijiwiki.com/wiki/%E9%AC%83%E6%AF%9B%E9%82%AE%E6%8A%A5","wikiEn":"https://reverse1999.fandom.com/wiki/Insatiable_Bloodsucker_(Enemy)","thumb":"./assets/bosses/v3a3_boss1.webp","hero":"./assets/bosses/v3a3_boss1.webp","dossier":"./assets/bosses/global_insatiable_bloodsucker_dossier.webp","pos":"50% 28%"}],
+  ["超限的囚徒", {"cn":"超限的囚徒","en":"Captive of Transcendentality","version":"3.2","edition":"Witness's Edition","editionTagEn":"v3.2 Anomaly Gallery","weakness":["beast","intellect"],"tags":["单体追击","3回合仪式窗"],"tagsEn":["1-target DMG","Burst DMG"],"wiki":"https://res1999.huijiwiki.com/wiki/%E9%AC%83%E6%AF%9B%E9%82%AE%E6%8A%A5","wikiEn":"https://reverse1999.fandom.com/wiki/Captive_of_Transcendentality_(Enemy)","thumb":"./assets/bosses/v3a2_boss2.webp","hero":"./assets/bosses/v3a2_boss2.webp","dossier":"./assets/bosses/global_captive_t1_dossier.webp","pos":"50% 20%"}],
+  ["蜕化的残响", {"cn":"蜕化的残响","en":"The Cocooned Lament","version":"3.2","edition":"Witness's Edition","editionTagEn":"v3.2 Anomaly Gallery","weakness":["mineral","beast"],"tags":["精神创伤","额外行动"],"tagsEn":["Mass DMG","Extra Action"],"wiki":"https://res1999.huijiwiki.com/wiki/%E9%AC%83%E6%AF%9B%E9%82%AE%E6%8A%A5","wikiEn":"https://reverse1999.fandom.com/wiki/The_Cocooned_Lament_(Enemy)","thumb":"./assets/bosses/v3a2_boss1.webp","hero":"./assets/bosses/v3a2_boss1.webp","dossier":"./assets/bosses/global_cocooned_lament_dossier.webp","pos":"50% 30%"}],
+  ["信仰的移位", {"cn":"信仰的移位","en":"Distortion of Faith","version":"3.2","edition":"Witness's Edition","editionTagEn":"v3.2 Anomaly Gallery","weakness":["spirit","intellect"],"tags":["群体伤害","主动减益"],"tagsEn":["Mass DMG","Debuff Incantation"],"wiki":"https://res1999.huijiwiki.com/wiki/%E9%AC%83%E6%AF%9B%E9%82%AE%E6%8A%A5","wikiEn":"https://reverse1999.fandom.com/wiki/Distortion_of_Faith_(Enemy)","thumb":"./assets/bosses/v3a2_boss3.webp","hero":"./assets/bosses/v3a2_boss3.webp","dossier":"./assets/bosses/global_distortion_of_faith_t1_dossier.webp","pos":"50% 24%"}]
 ]);
 
 const BOSS_EN_TO_CN = new Map();
@@ -1048,39 +1048,39 @@ const FLASHBACK_STAGE_ART = [
   {
     stageNo: 1,
     match: ['洞知', '额外行动', 'pursuit', 'extra action', 'charybdis', 'hippocampus', 'pt-i'],
-    hero: './assets/bosses/fb_stage1.png',
-    thumb: './assets/bosses/fb_stage1.png',
+    hero: './assets/bosses/fb_stage1.webp',
+    thumb: './assets/bosses/fb_stage1.webp',
     pos: '50% 22%',
     wikiEn: 'https://reverse1999.fandom.com/wiki/Focused_Flashback',
     wikiZh: 'https://res1999.huijiwiki.com/wiki/%E7%84%A6%E7%82%B9%E9%97%AA%E5%9B%9E',
     enemies: [
-      { name: '马头鱼尾兽', en: 'Hippocampus', icon: './assets/bosses/fb_hippocampus_icon.png', art: './assets/bosses/fb_hippocampus.png' },
-      { name: '卡律布狄斯', en: 'Charybdis',   icon: './assets/bosses/fb_charybdis_icon.png',   art: './assets/bosses/fb_stage1.png' }
+      { name: '马头鱼尾兽', en: 'Hippocampus', icon: './assets/bosses/fb_hippocampus_icon.png', art: './assets/bosses/fb_hippocampus.webp' },
+      { name: '卡律布狄斯', en: 'Charybdis',   icon: './assets/bosses/fb_charybdis_icon.png',   art: './assets/bosses/fb_stage1.webp' }
     ]
   },
   {
     stageNo: 2,
     match: ['余辉', '斯库拉', 'lingering glow', 'afterglow', 'scylla', 'pt-ii'],
-    hero: './assets/bosses/fb_stage2.png',
-    thumb: './assets/bosses/fb_stage2.png',
+    hero: './assets/bosses/fb_stage2.webp',
+    thumb: './assets/bosses/fb_stage2.webp',
     pos: '50% 24%',
     wikiEn: 'https://reverse1999.fandom.com/wiki/Focused_Flashback',
     wikiZh: 'https://res1999.huijiwiki.com/wiki/%E7%84%A6%E7%82%B9%E9%97%AA%E5%9B%9E',
     enemies: [
-      { name: '斯库拉',     en: 'Scylla',      icon: './assets/bosses/fb_scylla_icon.png',      art: './assets/bosses/fb_scylla.png' },
-      { name: '野生斯库拉', en: 'Wild Scylla', icon: './assets/bosses/fb_wild_scylla_icon.png', art: './assets/bosses/fb_stage2.png' }
+      { name: '斯库拉',     en: 'Scylla',      icon: './assets/bosses/fb_scylla_icon.png',      art: './assets/bosses/fb_scylla.webp' },
+      { name: '野生斯库拉', en: 'Wild Scylla', icon: './assets/bosses/fb_wild_scylla_icon.png', art: './assets/bosses/fb_stage2.webp' }
     ]
   },
   {
     stageNo: 3,
     match: ['术具', '金毛羊', 'conduit', 'golden', 'ram', 'eclipse', 'pt-iii'],
-    hero: './assets/bosses/fb_stage3.png',
-    thumb: './assets/bosses/fb_stage3.png',
+    hero: './assets/bosses/fb_stage3.webp',
+    thumb: './assets/bosses/fb_stage3.webp',
     pos: '50% 20%',
     wikiEn: 'https://reverse1999.fandom.com/wiki/Focused_Flashback',
     wikiZh: 'https://res1999.huijiwiki.com/wiki/%E7%84%A6%E7%82%B9%E9%97%AA%E5%9B%9E',
     enemies: [
-      { name: '金毛羊', en: 'Golden-Fleeced Ram', icon: './assets/bosses/fb_golden_fleece_icon.png', art: './assets/bosses/fb_stage3.png' }
+      { name: '金毛羊', en: 'Golden-Fleeced Ram', icon: './assets/bosses/fb_golden_fleece_icon.png', art: './assets/bosses/fb_stage3.webp' }
     ]
   }
 ];
@@ -1100,20 +1100,20 @@ export function resolveFlashbackStageArt(stage) {
 
 export function rarityOverlaySrc(star) {
   const s = Math.min(6, Math.max(2, Number(star) || 6));
-  return `./assets/uttu/bg_pz00${s}.png`;
+  return `./assets/uttu/bg_pz00${s}.webp`;
 }
 
 export const MANE_GRADE_LADDER = [
-  { minScore: 50000,     grade: 'C',   subGrade: 'C',       tier: 'c',      tagEn: '',      tagZh: '',     labelEn: 'C',                    labelZh: 'C',           imgEn: './assets/grades/global_c.png',    imgZh: './assets/grades/c4.webp' },
-  { minScore: 150000,    grade: 'B',   subGrade: 'B',       tier: 'b',      tagEn: '',      tagZh: '',     labelEn: 'B',                    labelZh: 'B',           imgEn: './assets/grades/global_b.png',    imgZh: './assets/grades/b4.webp' },
-  { minScore: 300000,    grade: 'A',   subGrade: 'A',       tier: 'a',      tagEn: '',      tagZh: '',     labelEn: 'A',                    labelZh: 'A',           imgEn: './assets/grades/global_a.png',    imgZh: './assets/grades/a4.webp' },
-  { minScore: 500000,    grade: 'S',   subGrade: 'S',       tier: 's',      tagEn: '',      tagZh: '',     labelEn: 'S',                    labelZh: 'S',           imgEn: './assets/grades/global_s.png',    imgZh: './assets/grades/s_v4.webp' },
-  { minScore: 800000,    grade: 'SS',  subGrade: 'SS',      tier: 'ss',     tagEn: '',      tagZh: '',     labelEn: 'SS',                   labelZh: 'SS',          imgEn: './assets/grades/global_ss.png',   imgZh: './assets/grades/ss_v4.webp' },
-  { minScore: 1250000,   grade: 'SSS', subGrade: 'SSS I',   tier: 'sss',    tagEn: '',      tagZh: '',     labelEn: 'SSS I',                labelZh: 'SSS Ⅰ',       imgEn: './assets/grades/global_sss1.png', imgZh: './assets/grades/sss_prism.webp' },
-  { minScore: 2500000,   grade: 'SSS', subGrade: 'SSS II',  tier: 'sss',    tagEn: '',      tagZh: '',     labelEn: 'SSS II',               labelZh: 'SSS Ⅱ',       imgEn: './assets/grades/global_sss2.png', imgZh: './assets/grades/sss_prism.webp' },
-  { minScore: 5000000,   grade: 'SSS', subGrade: 'SSS III', tier: 'sss',    tagEn: '',      tagZh: '',     labelEn: 'SSS III',              labelZh: 'SSS Ⅲ',       imgEn: './assets/grades/global_sss3.png', imgZh: './assets/grades/sss_prism.webp' },
-  { minScore: 10000000,  grade: 'SSS', subGrade: 'SSS IV',  tier: 'sss',    tagEn: '',      tagZh: '',     labelEn: 'SSS IV',               labelZh: 'SSS Ⅳ',       imgEn: './assets/grades/global_sss4.png', imgZh: './assets/grades/global_sss4.png' },
-  { minScore: 100000000, grade: 'SSS', subGrade: 'SSS IV',  tier: 'mythic', tagEn: '100M+', tagZh: '破亿', labelEn: 'SSS IV · 100M+ Mythic', labelZh: 'SSS Ⅳ · 破亿', imgEn: './assets/grades/global_sss4.png', imgZh: './assets/grades/sss_prism.webp' }
+  { minScore: 50000,     grade: 'C',   subGrade: 'C',       tier: 'c',      tagEn: '',      tagZh: '',     labelEn: 'C',                    labelZh: 'C',           imgEn: './assets/grades/global_c.webp',    imgZh: './assets/grades/c4.webp' },
+  { minScore: 150000,    grade: 'B',   subGrade: 'B',       tier: 'b',      tagEn: '',      tagZh: '',     labelEn: 'B',                    labelZh: 'B',           imgEn: './assets/grades/global_b.webp',    imgZh: './assets/grades/b4.webp' },
+  { minScore: 300000,    grade: 'A',   subGrade: 'A',       tier: 'a',      tagEn: '',      tagZh: '',     labelEn: 'A',                    labelZh: 'A',           imgEn: './assets/grades/global_a.webp',    imgZh: './assets/grades/a4.webp' },
+  { minScore: 500000,    grade: 'S',   subGrade: 'S',       tier: 's',      tagEn: '',      tagZh: '',     labelEn: 'S',                    labelZh: 'S',           imgEn: './assets/grades/global_s.webp',    imgZh: './assets/grades/s_v4.webp' },
+  { minScore: 800000,    grade: 'SS',  subGrade: 'SS',      tier: 'ss',     tagEn: '',      tagZh: '',     labelEn: 'SS',                   labelZh: 'SS',          imgEn: './assets/grades/global_ss.webp',   imgZh: './assets/grades/ss_v4.webp' },
+  { minScore: 1250000,   grade: 'SSS', subGrade: 'SSS I',   tier: 'sss',    tagEn: '',      tagZh: '',     labelEn: 'SSS I',                labelZh: 'SSS Ⅰ',       imgEn: './assets/grades/global_sss1.webp', imgZh: './assets/grades/sss_prism.webp' },
+  { minScore: 2500000,   grade: 'SSS', subGrade: 'SSS II',  tier: 'sss',    tagEn: '',      tagZh: '',     labelEn: 'SSS II',               labelZh: 'SSS Ⅱ',       imgEn: './assets/grades/global_sss2.webp', imgZh: './assets/grades/sss_prism.webp' },
+  { minScore: 5000000,   grade: 'SSS', subGrade: 'SSS III', tier: 'sss',    tagEn: '',      tagZh: '',     labelEn: 'SSS III',              labelZh: 'SSS Ⅲ',       imgEn: './assets/grades/global_sss3.webp', imgZh: './assets/grades/sss_prism.webp' },
+  { minScore: 10000000,  grade: 'SSS', subGrade: 'SSS IV',  tier: 'sss',    tagEn: '',      tagZh: '',     labelEn: 'SSS IV',               labelZh: 'SSS Ⅳ',       imgEn: './assets/grades/global_sss4.webp', imgZh: './assets/grades/global_sss4.webp' },
+  { minScore: 100000000, grade: 'SSS', subGrade: 'SSS IV',  tier: 'mythic', tagEn: '100M+', tagZh: '破亿', labelEn: 'SSS IV · 100M+ Mythic', labelZh: 'SSS Ⅳ · 破亿', imgEn: './assets/grades/global_sss4.webp', imgZh: './assets/grades/sss_prism.webp' }
 ];
 
 export function resolveManeGrade(score, lang = getLang()) {

@@ -1,4 +1,3 @@
-import supabaseVendor from './vendor/supabase.umd.js';
 import {
   cleanStageDisplayName,
   formatBossCount,
@@ -125,30 +124,35 @@ async function ensureOfflineSnapshot() {
   return offlineSnapshotPromise;
 }
 
-let ocrModulePromise = null;
-function loadOcrModule() {
-  if (globalThis.__R1999_OCR__) return Promise.resolve(globalThis.__R1999_OCR__);
-  if (ocrModulePromise) return ocrModulePromise;
-  ocrModulePromise = new Promise((resolve, reject) => {
+const scriptBundlePromises = new Map();
+function loadScriptBundle(relPath, getGlobal) {
+  const ready = getGlobal();
+  if (ready) return Promise.resolve(ready);
+  if (scriptBundlePromises.has(relPath)) return scriptBundlePromises.get(relPath);
+  const promise = new Promise((resolve, reject) => {
     const ver = String(globalThis.LEADERBOARD_CONFIG?.assetVersion || globalThis.__R1999_ASSET_VER__ || '').trim();
     const s = document.createElement('script');
-    s.src = ver ? `./ocr.bundle.js?v=${encodeURIComponent(ver)}` : './ocr.bundle.js';
+    s.src = ver ? `${relPath}?v=${encodeURIComponent(ver)}` : relPath;
     s.async = true;
     s.onload = () => {
-      if (globalThis.__R1999_OCR__) resolve(globalThis.__R1999_OCR__);
+      const mod = getGlobal();
+      if (mod) resolve(mod);
       else {
-        ocrModulePromise = null;
-        reject(new Error('OCR module did not initialize'));
+        scriptBundlePromises.delete(relPath);
+        reject(new Error(`Bundle did not initialize: ${relPath}`));
       }
     };
     s.onerror = () => {
-      ocrModulePromise = null;
-      reject(new Error('Failed to load OCR module'));
+      scriptBundlePromises.delete(relPath);
+      reject(new Error(`Failed to load bundle: ${relPath}`));
     };
     document.head.appendChild(s);
   });
-  return ocrModulePromise;
+  scriptBundlePromises.set(relPath, promise);
+  return promise;
 }
+const loadOcrModule = () => loadScriptBundle('./ocr.bundle.js', () => globalThis.__R1999_OCR__);
+const loadSupabaseVendor = () => loadScriptBundle('./supabase.bundle.js', () => globalThis.__R1999_SUPABASE__);
 
 const $ = (sel) => document.querySelector(sel);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (ch) =>
@@ -329,7 +333,8 @@ const state = {
   psyAmpLevel: 5,
   activePsyDossierId: '',
   posterTheme: 'parchment',
-  glossaryOpen: null
+  glossaryOpen: null,
+  activeDossierModal: null
 };
 
 let sb = null;
@@ -1437,6 +1442,7 @@ function closeProofLightbox() {
 }
 
 function closeModal() {
+  state.activeDossierModal = null;
   closeProofLightbox();
   clearUploadPreview();
   closeCharPicker();
@@ -1527,6 +1533,253 @@ function compareFlashbackRecord(a, b) {
     (Date.parse(a.created_at) - Date.parse(b.created_at)) ||
     String(a.id).localeCompare(String(b.id))
   );
+}
+
+/* ==================== Lightweight Pure-Fetch Public REST & SWR Cache ==================== */
+const LIVE_SWR_CACHE_KEY = 'r1999-live-swr-v1';
+const LIVE_SWR_TTL_MS = 24 * 60 * 60 * 1000;
+
+const loadedSlices = {
+  maneCore: false,
+  maneTotals: false,
+  maneDaily: false,
+  fbCore: false,
+  fbCarries: false,
+  fbPlayers: false
+};
+const inflightSlices = new Map();
+
+function hasStoredSupabaseSession() {
+  try {
+    return Object.keys(localStorage).some((k) => k.startsWith('sb-') && k.endsWith('-auth-token') && Boolean(localStorage.getItem(k)));
+  } catch {
+    return false;
+  }
+}
+
+function hasAuthCallbackParams() {
+  try {
+    const h = String(location.hash || '');
+    const s = String(location.search || '');
+    return /(?:access_token=|refresh_token=|code=|type=magiclink|type=recovery)/i.test(`${h}&${s}`);
+  } catch {
+    return false;
+  }
+}
+
+async function restFetchJson(pathAndQuery) {
+  const cfg = window.LEADERBOARD_CONFIG;
+  if (!cfg?.supabaseUrl || !cfg?.supabaseAnonKey) {
+    throw new Error(L('Missing Supabase configuration in config.js.', '缺少 config.js 后端配置。'));
+  }
+  const base = cfg.supabaseUrl.replace(/\/+$/, '');
+  const res = await fetch(`${base}/rest/v1/${pathAndQuery}`, {
+    headers: {
+      apikey: cfg.supabaseAnonKey,
+      Authorization: `Bearer ${cfg.supabaseAnonKey}`,
+      Accept: 'application/json'
+    }
+  });
+  const text = await res.text();
+  let parsed = null;
+  if (text) {
+    try { parsed = JSON.parse(text); } catch { parsed = null; }
+  }
+  if (!res.ok) {
+    const msg = (parsed && (parsed.message || parsed.error_description || parsed.error)) || `HTTP ${res.status}`;
+    const err = new Error(msg);
+    err.status = res.status;
+    if (parsed?.code) err.code = parsed.code;
+    throw err;
+  }
+  return Array.isArray(parsed) || (parsed && typeof parsed === 'object') ? parsed : [];
+}
+
+async function restLoadPages(table, orderKeys, select = '*', filterParams = '') {
+  const orderParam = (orderKeys || []).map((k) => (k.includes('.') ? k : `${k}.asc`)).join(',');
+  const baseParts = [`select=${encodeURIComponent(select)}`];
+  if (filterParams) baseParts.push(filterParams);
+  if (orderParam) baseParts.push(`order=${encodeURIComponent(orderParam)}`);
+  const prefix = baseParts.join('&');
+  const rows = [];
+  for (let offset = 0; ; offset += 500) {
+    const page = await retryTransient(() => restFetchJson(`${table}?${prefix}&offset=${offset}&limit=500`));
+    rows.push(...(page || []));
+    if (!page || page.length < 500) return rows;
+  }
+}
+
+// Mirrors Supabase SQL view public.flashback_current_lineups + public.leaderboard_records locally in <2ms
+function expandFlashbackLineupVariantsLocal(row) {
+  const members = Array.isArray(row?.team) ? row.team : [];
+  if (!members.length) return [];
+  const isLegacyCell = Boolean(row.source_history_id) && members.length <= 1;
+  if (isLegacyCell) return [{ chars: null, displayTeam: members }];
+
+  const slotChoices = members.map((v) => String(v ?? '').split(/[\/／]/).map((s) => s.trim()).filter(Boolean));
+  const multiIdx = [];
+  slotChoices.forEach((c, idx) => { if (c.length > 1) multiIdx.push(idx); });
+  if (multiIdx.length > 1 || slotChoices.some((c) => c.length === 0)) {
+    return [{ chars: null, displayTeam: members }];
+  }
+  const variants = multiIdx.length === 1
+    ? slotChoices[multiIdx[0]].map((choice) => slotChoices.map((c, idx) => (idx === multiIdx[0] ? choice : c[0])))
+    : [slotChoices.map((c) => c[0])];
+
+  return variants.map((disp) => ({
+    chars: disp.map((v) => v.normalize('NFKC').trim().toLowerCase()).sort(),
+    displayTeam: disp
+  }));
+}
+
+function deriveFlashbackLeaderboardFromApproved(subsRows, profilesRows, stagesRows, versionsRows) {
+  const profileById = new Map((profilesRows || []).map((p) => [p.id, p.display_name]));
+  const stageById = new Map((stagesRows || []).map((s) => [s.id, s]));
+  const verById = new Map((versionsRows || []).filter((v) => !v.archived_at).map((v) => [v.id, v]));
+
+  const bestByVariantKey = new Map();
+  for (const row of subsRows || []) {
+    const st = stageById.get(row.stage_id);
+    if (!st) continue;
+    const ver = verById.get(st.version_id);
+    if (!ver) continue;
+    for (const v of expandFlashbackLineupVariantsLocal(row)) {
+      const vKey = v.chars
+        ? `${row.stage_id}::${row.group_code}::C::${JSON.stringify(v.chars)}`
+        : `${row.stage_id}::${row.group_code}::L::${row.team_key || ''}`;
+      const cand = {
+        row,
+        stage: st,
+        version: ver,
+        chars: v.chars,
+        charSet: v.chars ? new Set(v.chars) : null,
+        displayTeam: v.displayTeam
+      };
+      const prev = bestByVariantKey.get(vKey);
+      if (!prev || compareFlashbackRecord(cand.row, prev.row) < 0) {
+        bestByVariantKey.set(vKey, cand);
+      }
+    }
+  }
+
+  const byGroup = new Map();
+  for (const item of bestByVariantKey.values()) {
+    const gk = `${item.row.stage_id}::${item.row.group_code}`;
+    if (!byGroup.has(gk)) byGroup.set(gk, []);
+    byGroup.get(gk).push(item);
+  }
+
+  const survivorsBySubId = new Map();
+  for (const items of byGroup.values()) {
+    for (const a of items) {
+      if (a.chars) {
+        const dominated = items.some((b) =>
+          b.chars && b.chars.length < a.chars.length && b.chars.every((ch) => a.charSet.has(ch))
+        );
+        if (dominated) continue;
+      }
+      let agg = survivorsBySubId.get(a.row.id);
+      if (!agg) {
+        agg = { row: a.row, stage: a.stage, version: a.version, slotSets: a.displayTeam.map((val) => new Set([val])) };
+        survivorsBySubId.set(a.row.id, agg);
+      } else {
+        a.displayTeam.forEach((val, idx) => { if (agg.slotSets[idx]) agg.slotSets[idx].add(val); });
+      }
+    }
+  }
+
+  const out = [];
+  for (const agg of survivorsBySubId.values()) {
+    const r = agg.row;
+    out.push({
+      id: r.id,
+      player_id: r.player_id,
+      stage_id: r.stage_id,
+      group_code: r.group_code,
+      team: agg.slotSets.map((set) => [...set].sort().join('/')),
+      team_key: r.team_key,
+      carry_name: r.carry_name,
+      rounds: r.rounds,
+      created_at: r.created_at,
+      display_name: r.credited_player || profileById.get(r.player_id) || '',
+      stage_no: agg.stage.stage_no,
+      stage_name: agg.stage.name,
+      version_id: agg.stage.version_id,
+      version_name: agg.version.label || agg.version.code || '',
+      related_url: r.related_url || null,
+      resonance_ten: r.resonance_ten,
+      team_psychubes: r.team_psychubes || null,
+      team_resonance_codes: r.team_resonance_codes || null
+    });
+  }
+  return out;
+}
+
+/** Derives per-scope carry challenge counts locally from winning Flashback records. */
+function deriveFlashbackCarriesFromRecords(records, stages) {
+  const stMap = new Map((stages || []).map((s) => [s.id, s]));
+  const byScope = new Map();
+  for (const r of records || []) {
+    const ch = stMap.get(r.stage_id)?.challenge_id || r.stage_id;
+    const vid = r.version_id || stMap.get(r.stage_id)?.version_id || null;
+    for (const carry of splitCarries(r.carry_name)) {
+      const scopes = vid ? [vid, null] : [null];
+      for (const scopeVid of scopes) {
+        const key = `${scopeVid || 'ALL'}\u0000${carry}`;
+        let entry = byScope.get(key);
+        if (!entry) {
+          entry = { version_id: scopeVid, carry_name: carry, challenges: new Set() };
+          byScope.set(key, entry);
+        }
+        entry.challenges.add(ch);
+      }
+    }
+  }
+  return [...byScope.values()].map(({ version_id, carry_name, challenges }) => ({
+    version_id,
+    carry_name,
+    challenge_count: challenges.size
+  }));
+}
+
+function hydrateFromLiveCache() {
+  try {
+    const raw = localStorage.getItem(LIVE_SWR_CACHE_KEY);
+    if (!raw) return false;
+    const cached = JSON.parse(raw);
+    if (!cached || !Number.isFinite(cached.ts) || (Date.now() - cached.ts) > LIVE_SWR_TTL_MS) return false;
+    if (Array.isArray(cached.maneMaps) && cached.maneMaps.length) state.maneMaps = cached.maneMaps;
+    if (Array.isArray(cached.maneScores) && cached.maneScores.length) state.maneScores = cached.maneScores;
+    if (Array.isArray(cached.fbVersions) && cached.fbVersions.length) state.fbVersions = cached.fbVersions;
+    if (Array.isArray(cached.fbStages) && cached.fbStages.length) state.fbStages = cached.fbStages;
+    if (Array.isArray(cached.fbRecords) && cached.fbRecords.length) {
+      state.fbRecords = cached.fbRecords;
+      state.fbCarries = deriveFlashbackCarriesFromRecords(state.fbRecords, state.fbStages);
+      state.fbPlayers = [];
+    }
+    if (Array.isArray(cached.fbArchives)) state.fbArchives = cached.fbArchives;
+    syncActiveSelectionsAfterLoad();
+    return state.mode === 'flashback' ? state.fbRecords.length > 0 : state.maneScores.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+function saveLiveCache() {
+  try {
+    const payload = {
+      ts: Date.now(),
+      maneMaps: state.maneMaps,
+      maneScores: state.maneScores,
+      fbVersions: state.fbVersions,
+      fbStages: state.fbStages,
+      fbRecords: state.fbRecords,
+      fbArchives: state.fbArchives
+    };
+    localStorage.setItem(LIVE_SWR_CACHE_KEY, JSON.stringify(payload));
+  } catch {
+    // Ignore storage quota errors
+  }
 }
 
 function activeManeMaps(section = state.maneSection) {
@@ -1712,7 +1965,8 @@ async function ensureSupabaseClient() {
   if (!cfg?.supabaseUrl || !cfg?.supabaseAnonKey) {
     throw new Error(L('Missing Supabase configuration in config.js.', '缺少 config.js 后端配置。'));
   }
-  let createClient = supabaseVendor?.createClient || supabaseVendor?.default?.createClient || globalThis.supabase?.createClient;
+  const vendor = await loadSupabaseVendor().catch(() => null);
+  let createClient = vendor?.createClient || vendor?.default?.createClient || globalThis.supabase?.createClient;
   if (typeof createClient !== 'function') {
     const cdnFallbacks = [
       'https://fastly.jsdelivr.net/npm/@supabase/supabase-js@2/+esm',
@@ -1746,19 +2000,119 @@ async function ensureSupabaseClient() {
   return sb;
 }
 
-async function syncLiveArchive({ silent = false } = {}) {
+async function ensureDataSlice(sliceName, { force = false, silentRender = false } = {}) {
+  if (!force && loadedSlices[sliceName]) return;
+  if (inflightSlices.has(sliceName)) return inflightSlices.get(sliceName);
+
+  const run = (async () => {
+    if (sliceName === 'maneCore') {
+      const [maneMaps, maneScores] = await Promise.all([
+        retryTransient(() => restFetchJson('mane_maps?select=id%2Cname%2Csection%2Cedition%2Cposition%2Copens_at%2Cactive&active=eq.true')),
+        restLoadPages('mane_leaderboard', ['id'])
+      ]);
+      state.maneMaps = (maneMaps || []).sort((a, b) =>
+        String(b.edition).localeCompare(String(a.edition), 'en', { numeric: true }) ||
+        (a.position - b.position) ||
+        String(a.name).localeCompare(String(b.name), 'zh-CN')
+      );
+      state.maneScores = maneScores || [];
+      loadedSlices.maneCore = true;
+      syncActiveSelectionsAfterLoad();
+      saveLiveCache();
+      state.dataSource = 'live';
+      state.connected = true;
+      state.errorNotice = '';
+      state.loading = false;
+    } else if (sliceName === 'maneTotals') {
+      state.maneTotals = await restLoadPages('mane_carry_total_leaderboard', ['section', 'edition', 'division', 'carry_key']);
+      loadedSlices.maneTotals = true;
+    } else if (sliceName === 'maneDaily') {
+      state.maneDailyScores = await restLoadPages(
+        'mane_daily_scores',
+        ['id'],
+        'id,map_id,division,display_name,carry,team,score,approved_at,related_url'
+      );
+      loadedSlices.maneDaily = true;
+    } else if (sliceName === 'fbCore') {
+      const [fbVersionsRaw, fbStages, fbArchives, fbSubmissionsRaw, fbProfiles] = await Promise.all([
+        retryTransient(() => restFetchJson('versions?select=id%2Ccode%2Clabel%2Ccreated_at%2Carchived_at')),
+        retryTransient(() => restFetchJson('stages?select=id%2Cversion_id%2Cstage_no%2Cname%2Cchallenge_id')),
+        retryTransient(() => restFetchJson('historical_records?select=id%2Cstage_id%2Cgroup_code%2Cdisplay_order%2Ccarry_names%2Clineup_label%2Ccredited_player')),
+        restLoadPages(
+          'submissions',
+          ['id'],
+          'id,player_id,credited_profile_id,credited_player,source_history_id,stage_id,group_code,team,team_key,carry_name,rounds,created_at,related_url,resonance_ten,team_psychubes,team_resonance_codes',
+          'status=eq.approved&archived_at=is.null'
+        ),
+        restLoadPages('profiles', ['id'], 'id,display_name')
+      ]);
+      const activeVersions = (fbVersionsRaw || []).filter((v) => !v.archived_at);
+      state.fbVersions = activeVersions.sort((a, b) =>
+        String(b.code).localeCompare(String(a.code), 'en', { numeric: true }) ||
+        (Date.parse(b.created_at) - Date.parse(a.created_at))
+      );
+      state.fbStages = fbStages || [];
+      state.fbArchives = fbArchives || [];
+      const profileNameById = new Map((fbProfiles || []).map((p) => [p.id, p.display_name]));
+      state.fbApprovedRecords = (fbSubmissionsRaw || []).map((row) => ({
+        ...row,
+        display_name: row.credited_player || profileNameById.get(row.credited_profile_id || row.player_id) || ''
+      }));
+      state.fbRecords = deriveFlashbackLeaderboardFromApproved(fbSubmissionsRaw, fbProfiles, state.fbStages, fbVersionsRaw);
+      state.fbCarries = deriveFlashbackCarriesFromRecords(state.fbRecords, state.fbStages);
+      state.fbPlayers = [];
+      loadedSlices.fbCore = true;
+      loadedSlices.fbCarries = true;
+      loadedSlices.fbPlayers = true;
+      syncActiveSelectionsAfterLoad();
+      saveLiveCache();
+      state.dataSource = 'live';
+      state.connected = true;
+      state.errorNotice = '';
+      state.loading = false;
+    }
+  })().finally(() => {
+    inflightSlices.delete(sliceName);
+  });
+
+  inflightSlices.set(sliceName, run);
+  await run;
+  if (!silentRender) render();
+}
+
+function getRequiredSlicesForCurrentView() {
+  if (state.mode === 'flashback') return ['fbCore'];
+  const out = ['maneCore'];
+  if (state.manePage === 'totals') out.push('maneTotals');
+  else if (state.manePage === 'daily') out.push('maneDaily');
+  return out;
+}
+
+async function ensureActiveViewData({ force = false } = {}) {
+  const cfg = window.LEADERBOARD_CONFIG;
+  if (!cfg?.supabaseUrl || !cfg?.supabaseAnonKey) return;
+  if (isOfflineSandboxMode() && state.dataSource === 'offline') return;
+  const needed = getRequiredSlicesForCurrentView().filter((s) => force || (!loadedSlices[s] && !inflightSlices.has(s)));
+  if (!needed.length) return;
+  try {
+    await Promise.all(needed.map((s) => ensureDataSlice(s, { force })));
+  } catch (err) {
+    console.warn('View slice load failed:', err);
+  }
+}
+
+async function syncLiveArchive({ silent = false, force = true } = {}) {
   if (state.syncingLive) return;
   state.syncingLive = true;
   renderChrome();
   try {
-    await ensureSupabaseClient();
-    await Promise.all([loadAllData({ keepOfflineOnFail: true }), syncAuth()]);
+    await loadAllData({ keepOfflineOnFail: true, force });
     if (state.dataSource === 'live' && !silent) {
       toast(t('offlineSyncOk'));
     }
   } catch (err) {
     console.warn('Live sync failed:', err);
-    if (!state.maneMaps.length) {
+    if (!state.maneMaps.length && !state.fbStages.length) {
       await ensureOfflineSnapshot();
       hydrateFromOfflineSnapshot();
     }
@@ -1766,7 +2120,7 @@ async function syncLiveArchive({ silent = false } = {}) {
       state.dataSource = 'offline';
       state.connected = true;
       state.errorNotice = '';
-    } else {
+    } else if (!state.maneScores.length && !state.fbRecords.length) {
       state.dataSource = 'disconnected';
       state.connected = false;
       state.errorNotice = t('offlineSyncFail');
@@ -1779,37 +2133,7 @@ async function syncLiveArchive({ silent = false } = {}) {
   }
 }
 
-async function loadBoardBundle(board) {
-  if (board === 'mane') {
-    const [maneMaps, maneData] = await Promise.all([
-      retryTransient(() => checked(sb.from('mane_maps').select('id,name,section,edition,position,opens_at,active').eq('active', true))),
-      fetchPublicBoardData('mane')
-    ]);
-    state.maneMaps = (maneMaps || []).sort((a, b) =>
-      String(b.edition).localeCompare(String(a.edition), 'en', { numeric: true }) ||
-      (a.position - b.position) ||
-      String(a.name).localeCompare(String(b.name), 'zh-CN')
-    );
-    Object.assign(state, maneData);
-    return;
-  }
-
-  const [fbVersions, fbStages, flashbackData, fbArchives] = await Promise.all([
-    retryTransient(() => checked(sb.from('versions').select('id,code,label,created_at'))),
-    retryTransient(() => checked(sb.from('stages').select('id,version_id,stage_no,name,challenge_id'))),
-    fetchPublicBoardData('flashback'),
-    retryTransient(() => checked(sb.from('historical_records').select('id,stage_id,group_code,display_order,carry_names,lineup_label,credited_player')))
-  ]);
-  state.fbVersions = (fbVersions || []).sort((a, b) =>
-    String(b.code).localeCompare(String(a.code), 'en', { numeric: true }) ||
-    (Date.parse(b.created_at) - Date.parse(a.created_at))
-  );
-  state.fbStages = fbStages || [];
-  state.fbArchives = fbArchives || [];
-  Object.assign(state, flashbackData);
-}
-
-async function loadAllData({ keepOfflineOnFail = false } = {}) {
+async function loadAllData({ keepOfflineOnFail = false, force = true } = {}) {
   if (isOfflineSandboxMode() && state.dataSource === 'offline' && !sb) {
     await ensureOfflineSnapshot();
     hydrateFromOfflineSnapshot();
@@ -1819,32 +2143,21 @@ async function loadAllData({ keepOfflineOnFail = false } = {}) {
   await reviewedBoardRefresh;
   const coveredBoards = [...reviewedBoards];
   reviewedBoards.clear();
-  state.loading = true;
+  const hasVisibleData = state.mode === 'flashback' ? state.fbRecords.length > 0 : state.maneScores.length > 0;
+  if (!hasVisibleData) state.loading = true;
   renderChrome();
   try {
-    const primaryBoard = state.mode === 'flashback' ? 'flashback' : 'mane';
-    const secondaryBoard = primaryBoard === 'mane' ? 'flashback' : 'mane';
-    await loadBoardBundle(primaryBoard);
-
-    syncActiveSelectionsAfterLoad();
+    const slices = getRequiredSlicesForCurrentView();
+    await Promise.all(slices.map((s) => ensureDataSlice(s, { force, silentRender: true })));
     state.dataSource = 'live';
     state.connected = true;
     state.errorNotice = '';
     state.loading = false;
     render();
-
-    try {
-      await loadBoardBundle(secondaryBoard);
-      syncActiveSelectionsAfterLoad();
-      render();
-    } catch (secondaryErr) {
-      reviewedBoards.add(secondaryBoard);
-      console.warn(`Secondary board (${secondaryBoard}) sync failed, keeping primary live:`, secondaryErr);
-    }
   } catch (err) {
     coveredBoards.forEach((board) => { reviewedBoards.add(board); });
     console.error(err);
-    if (!state.maneMaps.length) {
+    if (!state.maneMaps.length && !state.fbStages.length) {
       await ensureOfflineSnapshot();
       hydrateFromOfflineSnapshot();
     }
@@ -1854,9 +2167,11 @@ async function loadAllData({ keepOfflineOnFail = false } = {}) {
       state.errorNotice = '';
       throw err;
     }
-    state.dataSource = 'disconnected';
-    state.connected = false;
-    state.errorNotice = t('offlineSyncFail');
+    if (!hasVisibleData) {
+      state.dataSource = 'disconnected';
+      state.connected = false;
+      state.errorNotice = t('offlineSyncFail');
+    }
     if (keepOfflineOnFail) throw err;
   } finally {
     state.loading = false;
@@ -1868,49 +2183,29 @@ async function loadAllData({ keepOfflineOnFail = false } = {}) {
 const reviewedBoards = new Set();
 let reviewedBoardRefresh = null;
 
-async function fetchPublicBoardData(board) {
-  if (board === 'mane') {
-    const [maneScores, maneTotals, maneDailyScores] = await Promise.all([
-      loadPages('mane_leaderboard', ['id']),
-      loadPages('mane_carry_total_leaderboard', ['section', 'edition', 'division', 'carry_key']),
-      loadPages('mane_daily_scores', ['id'], 'id,map_id,division,display_name,carry,team,score,approved_at,related_url')
-    ]);
-    return { maneScores, maneTotals, maneDailyScores };
-  }
-
-  const [fbRecords, fbPlayers, fbCarries, fbSubmissionsRaw, fbProfiles] = await Promise.all([
-    loadPages('leaderboard_records', ['id']),
-    loadPages('flashback_player_rankings_by_scope', ['version_id', 'player_id']),
-    loadPages('carry_rankings_by_scope', ['version_id', 'carry_name'], 'version_id,carry_name,challenge_count'),
-    loadPages(
-      'submissions',
-      ['id'],
-      'id,player_id,stage_id,group_code,team,carry_name,rounds,created_at,credited_player',
-      (q) => q.eq('status', 'approved').is('archived_at', null)
-    ),
-    loadPages('profiles', ['id'], 'id,display_name')
-  ]);
-  const profileNameById = new Map((fbProfiles || []).map((p) => [p.id, p.display_name]));
-  const fbRecordNameById = new Map((fbRecords || []).map((r) => [r.id, r.display_name]));
-  const fbApprovedRecords = (fbSubmissionsRaw || []).map((row) => ({
-    ...row,
-    display_name: row.credited_player || profileNameById.get(row.player_id) || fbRecordNameById.get(row.id) || ''
-  }));
-  return { fbRecords, fbPlayers, fbCarries, fbApprovedRecords };
-}
-
 function refreshReviewedBoards() {
-  if (!sb || state.dataSource !== 'live') return;
+  if (state.dataSource !== 'live') return;
   if (reviewedBoardRefresh || !reviewedBoards.size || state.loading || $('#modalOverlay')) return;
   const boards = [...reviewedBoards];
   reviewedBoards.clear();
-  reviewedBoardRefresh = Promise.allSettled(boards.map(fetchPublicBoardData)).then((results) => {
+  const tasks = boards.map(async (board) => {
+    if (board === 'mane') {
+      loadedSlices.maneCore = false;
+      const toReload = ['maneCore'];
+      if (loadedSlices.maneTotals || state.manePage === 'totals') toReload.push('maneTotals');
+      if (loadedSlices.maneDaily || state.manePage === 'daily') toReload.push('maneDaily');
+      await Promise.all(toReload.map((s) => ensureDataSlice(s, { force: true, silentRender: true })));
+    } else {
+      loadedSlices.fbCore = false;
+      loadedSlices.fbCarries = false;
+      loadedSlices.fbPlayers = false;
+      await ensureDataSlice('fbCore', { force: true, silentRender: true });
+    }
+  });
+  reviewedBoardRefresh = Promise.allSettled(tasks).then((results) => {
     let failed = false;
     for (const [index, result] of results.entries()) {
-      if (result.status === 'fulfilled') {
-        Object.assign(state, result.value);
-        continue;
-      }
+      if (result.status === 'fulfilled') continue;
       reviewedBoards.add(boards[index]);
       failed = true;
       console.error(result.reason);
@@ -2999,11 +3294,25 @@ function renderRowIntelColumnHtml({
 }
 
 /* ==================== V2 Deep Dossier Modals (Arcanist, Psychube, Investigator) ==================== */
+function scheduleDossierCrossHydration(type, key, reopenFn) {
+  if (state.dataSource !== 'live') return;
+  const want = ['maneCore', 'fbCore'];
+  if (type === 'player') want.push('maneDaily');
+  const missing = want.filter((s) => !loadedSlices[s]);
+  if (!missing.length) return;
+  Promise.allSettled(missing.map((s) => ensureDataSlice(s, { silentRender: true }))).then(() => {
+    if (state.activeDossierModal?.type === type && state.activeDossierModal?.key === key && $('#modalOverlay')) {
+      reopenFn();
+    }
+  });
+}
+
 function openArcanistDossier(rawName) {
   const lang = getLang();
   const detail = getArcanistDetail(rawName, lang);
   if (!detail) return;
   closeGlossaryPopover();
+  state.activeDossierModal = { type: 'arcanist', key: String(rawName) };
 
   const targetKey = detail.id ? `char:${detail.id}` : canonicalCharacterKey(detail.cn || rawName);
   const affMeta = AFFLATUS_META[detail.aff] || AFFLATUS_META.unknown;
@@ -3163,6 +3472,7 @@ function openArcanistDossier(rawName) {
       ${detail.wikiUrl ? `<a class="outline-btn" href="${esc(detail.wikiUrl)}" target="_blank" rel="noopener noreferrer">${esc(t('dossierOpenWiki', {}, lang))}</a>` : ''}
       <button type="button" class="ghost-btn" data-action="close-modal">${esc(t('btnClose', {}, lang))}</button>
     </div>`, true);
+  scheduleDossierCrossHydration('arcanist', String(rawName), () => openArcanistDossier(rawName));
 }
 
 const CIRCLED_NUMS = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧'];
@@ -3251,8 +3561,10 @@ function openPsychubeDossier(rawPsy) {
   const detail = getPsychubeDetail(rawPsy, lang);
   if (!detail) return;
   closeGlossaryPopover();
+  const preserveAmp = state.activeDossierModal?.type === 'psychube' && state.activePsyDossierId === detail.id;
   state.activePsyDossierId = detail.id;
-  state.psyAmpLevel = 5;
+  if (!preserveAmp) state.psyAmpLevel = 5;
+  state.activeDossierModal = { type: 'psychube', key: String(detail.id) };
 
   let equipCount = 0;
   const carrierCounts = new Map();
@@ -3344,6 +3656,7 @@ function openPsychubeDossier(rawPsy) {
       ${detail.wikiUrl ? `<a class="outline-btn" href="${esc(detail.wikiUrl)}" target="_blank" rel="noopener noreferrer">${esc(t('dossierOpenWiki', {}, lang))}</a>` : ''}
       <button type="button" class="ghost-btn" data-action="close-modal">${esc(t('btnClose', {}, lang))}</button>
     </div>`, true);
+  scheduleDossierCrossHydration('psychube', String(detail.id), () => openPsychubeDossier(rawPsy));
 }
 
 function formatDossierLineupText(team, carryStr, lang = getLang()) {
@@ -3367,6 +3680,7 @@ function openInvestigatorDossier(playerName) {
   const targetKey = normKey(playerName);
   if (!targetKey) return;
   closeGlossaryPopover();
+  state.activeDossierModal = { type: 'player', key: targetKey };
 
   const mapById = new Map(state.maneMaps.map((m) => [m.id, m]));
   const stageById = new Map(state.fbStages.map((s) => [s.id, s]));
@@ -3614,28 +3928,29 @@ function openInvestigatorDossier(playerName) {
     <div class="dossier-actions-row">
       <button type="button" class="ghost-btn" data-action="close-modal">${esc(t('btnClose', {}, lang))}</button>
     </div>`, true);
+  scheduleDossierCrossHydration('player', targetKey, () => openInvestigatorDossier(playerName));
 }
 
 /* ==================== Mane's Bulletin Pages ==================== */
 let maneDailyLoadSeq = 0;
 
 async function loadManeDailyRows({ date, division, mapIds }) {
-  if ((isOfflineSandboxMode() && state.dataSource === 'offline') || !sb) {
+  if (isOfflineSandboxMode() && state.dataSource === 'offline') {
     return filterOfflineDailyRows(state.maneDailyScores, { date, division, mapIds });
   }
   const [start, end] = beijingDayRange(date, getLang());
-  const rows = [];
-  for (let offset = 0; ; offset += 500) {
-    const page = await retryTransient(() => {
-      let query = sb.from('mane_daily_scores').select('id,map_id,division,display_name,carry,team,score,approved_at,related_url')
-        .gte('approved_at', start).lt('approved_at', end);
-      if (division) query = query.eq('division', division);
-      if (mapIds.length) query = query.in('map_id', mapIds);
-      return checked(query.order('approved_at', { ascending: false }).order('id').range(offset, offset + 499));
-    });
-    rows.push(...page);
-    if (page.length < 500) return rows;
-  }
+  const filters = [
+    `approved_at=gte.${encodeURIComponent(start)}`,
+    `approved_at=lt.${encodeURIComponent(end)}`
+  ];
+  if (division) filters.push(`division=eq.${encodeURIComponent(division)}`);
+  if (mapIds.length) filters.push(`map_id=in.(${mapIds.map((id) => encodeURIComponent(id)).join(',')})`);
+  return restLoadPages(
+    'mane_daily_scores',
+    ['approved_at.desc', 'id.asc'],
+    'id,map_id,division,display_name,carry,team,score,approved_at,related_url',
+    filters.join('&')
+  );
 }
 
 function getEffectiveDailyDate() {
@@ -3746,13 +4061,12 @@ async function fillManeDailyResults(host) {
 
     const extraBuildsById = new Map();
     const missingIds = rows.filter((r) => !scoreById.has(r.id)).map((r) => r.id);
-    if (missingIds.length && state.dataSource === 'live' && sb) {
+    if (missingIds.length && state.dataSource === 'live') {
       try {
         for (let i = 0; i < missingIds.length; i += 200) {
           const chunk = missingIds.slice(i, i + 200);
-          const extra = await checked(
-            sb.from('mane_entries').select('id,team_psychubes,team_resonance_codes').in('id', chunk)
-          );
+          const idList = chunk.map((id) => encodeURIComponent(id)).join(',');
+          const extra = await restFetchJson(`mane_entries?select=id%2Cteam_psychubes%2Cteam_resonance_codes&id=in.(${idList})`);
           for (const entry of extra || []) extraBuildsById.set(entry.id, entry);
         }
       } catch (err) {
@@ -4309,7 +4623,7 @@ function renderManeTotals(latestEdition, sectionMaps = []) {
               </tbody>
             </table>
           </div>`
-        : `<div class="empty-state"><span class="empty-glyph">✦</span><h3>${esc(t('totalsEmpty', {}, lang))}</h3></div>`
+        : `<div class="empty-state"><span class="empty-glyph">✦</span><h3>${esc(inflightSlices.has('maneTotals') || state.loading ? t('emptyTitleLoading', {}, lang) : t('totalsEmpty', {}, lang))}</h3></div>`
       }
       <div class="board-foot">
         <span>${esc(localizeDivision(state.maneDivision, lang))} · ${esc(formatEntries(rows.length, lang))}</span>
@@ -5030,7 +5344,7 @@ function renderFlashbackCarries() {
               </tbody>
             </table>
           </div>`
-        : `<div class="empty-state"><span class="empty-glyph">◇</span><h3>${esc(t('emptyTitleEmpty', {}, lang))}</h3></div>`
+        : `<div class="empty-state"><span class="empty-glyph">◇</span><h3>${esc(inflightSlices.has('fbCarries') || state.loading ? t('emptyTitleLoading', {}, lang) : t('emptyTitleEmpty', {}, lang))}</h3></div>`
       }
       <div class="board-foot"><span>${esc(t('carriesPageSub', {}, lang))}</span></div>
     </div>`;
@@ -5206,7 +5520,7 @@ function renderFlashbackPlayers() {
               </tbody>
             </table>
           </div>`
-        : `<div class="empty-state"><span class="empty-glyph">♙</span><h3>${esc(t('playersEmpty', {}, lang))}</h3></div>`
+        : `<div class="empty-state"><span class="empty-glyph">♙</span><h3>${esc(inflightSlices.has('fbPlayers') || state.loading ? t('emptyTitleLoading', {}, lang) : t('playersEmpty', {}, lang))}</h3></div>`
       }
       <div class="board-foot"><span>${esc(t('playersFbFoot', {}, lang))}</span></div>
     </div>
@@ -7322,6 +7636,7 @@ document.addEventListener('click', async (ev) => {
       state.highlightRecordId = '';
       state.mobileFilterOpen = false;
       render();
+      void ensureActiveViewData();
       return;
     }
     if (btn.dataset.switchMode) {
@@ -7332,6 +7647,7 @@ document.addEventListener('click', async (ev) => {
       state.highlightRecordId = '';
       state.mobileFilterOpen = false;
       render();
+      void ensureActiveViewData();
       return;
     }
     if (btn.dataset.subpage) {
@@ -7340,6 +7656,7 @@ document.addEventListener('click', async (ev) => {
       state.highlightRecordId = '';
       state.mobileFilterOpen = false;
       render();
+      void ensureActiveViewData();
       return;
     }
 
@@ -7891,8 +8208,7 @@ document.addEventListener('click', async (ev) => {
         render();
         toast(t('toastRefreshed'));
       } else {
-        await ensureSupabaseClient();
-        await loadAllData({ keepOfflineOnFail: isOfflineSandboxMode() });
+        await loadAllData({ keepOfflineOnFail: isOfflineSandboxMode(), force: true });
         if (state.connected) toast(t('toastRefreshed'));
       }
       return;
@@ -7902,8 +8218,10 @@ document.addEventListener('click', async (ev) => {
         await ensureOfflineSnapshot();
         hydrateFromOfflineSnapshot();
       } else {
-        await ensureSupabaseClient();
-        state.maneScores = await loadPages('mane_leaderboard', ['id']);
+        await Promise.all([
+          ensureDataSlice('maneCore', { force: true, silentRender: true }),
+          ensureDataSlice('maneDaily', { force: true, silentRender: true })
+        ]);
       }
       render();
       toast(t('toastRefreshed'));
@@ -7918,6 +8236,7 @@ document.addEventListener('click', async (ev) => {
       const targetMaps = activeManeMaps(state.maneSection);
       if (!targetMaps.some((m) => m.id === state.maneMapId)) state.maneMapId = targetMaps[0]?.id || '';
       render();
+      await ensureActiveViewData();
       if (action === 'switch-to-mane-submit') openManeSubmitModal();
       return;
     }
@@ -8385,9 +8704,10 @@ document.addEventListener('click', (ev) => {
 window.addEventListener('hashchange', () => {
   readHash();
   render();
+  void ensureActiveViewData();
 });
 
-/* ==================== Offline-First / Lazy Bootstrap ==================== */
+/* ==================== SWR Cache + On-Demand Live Bootstrap ==================== */
 async function bootstrap() {
   const lang = initLang();
   readHash();
@@ -8400,9 +8720,13 @@ async function bootstrap() {
   const useLive = !isOfflineSandboxMode() && Boolean(cfg?.supabaseUrl && cfg?.supabaseAnonKey);
   if (useLive) {
     state.dataSource = 'live';
-    state.loading = true;
+    const hasCache = hydrateFromLiveCache();
+    state.loading = !hasCache;
     render();
-    await syncLiveArchive({ silent: true });
+    await syncLiveArchive({ silent: true, force: true });
+    if (hasStoredSupabaseSession() || hasAuthCallbackParams()) {
+      void ensureSupabaseClient().then(() => syncAuth()).catch(() => {});
+    }
   } else {
     await ensureOfflineSnapshot();
     hydrateFromOfflineSnapshot();

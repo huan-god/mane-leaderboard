@@ -711,7 +711,7 @@ body[data-mode="flashback"] .mode-tab.active {
     linear-gradient(rgba(255, 232, 210, 0.1) 1px, transparent 1px),
     linear-gradient(90deg, rgba(255, 232, 210, 0.1) 1px, transparent 1px),
     linear-gradient(135deg, rgba(223, 105, 49, 0.88) 0%, rgba(178, 51, 38, 0.94) 100%),
-    url('./assets/official/btn-bg.png');
+    url('./assets/official/btn-bg.webp');
   background-size: 9px 9px, 9px 9px, 100% 100%, cover;
   background-position: 0 0, 0 0, center, center;
   color: #fff9f2;
@@ -1073,7 +1073,7 @@ body[data-mode="flashback"] .uttu-shell-frame {
   top: -54px;
   width: 240px;
   height: 240px;
-  background: url('./assets/official/pop-light.png') center / contain no-repeat;
+  background: url('./assets/official/pop-light.webp') center / contain no-repeat;
   opacity: 0.16;
   pointer-events: none;
   z-index: 0;
@@ -1105,7 +1105,7 @@ body[data-mode="flashback"] .masthead::before {
   border: 1px dashed rgba(229, 186, 115, 0.22);
   background:
     radial-gradient(circle, transparent 58%, rgba(229, 186, 115, 0.08) 59%, transparent 61%),
-    url('./assets/official/pop-light.png') center / 88% no-repeat;
+    url('./assets/official/pop-light.webp') center / 88% no-repeat;
   opacity: 0.34;
   pointer-events: none;
   z-index: 0;
@@ -3682,7 +3682,7 @@ body[data-mode="flashback"] .intel-peak-diff {
   color: #f6d388;
   background:
     linear-gradient(90deg, rgba(46, 30, 16, 0.86) 0%, rgba(29, 21, 15, 0.9) 46%, rgba(19, 15, 13, 0.94) 100%),
-    url('./assets/official/rank-row-bg.png') left center / cover no-repeat;
+    url('./assets/official/rank-row-bg.webp') left center / cover no-repeat;
   background-blend-mode: multiply, normal;
   box-shadow:
     inset 4px 0 0 #f2c977,
@@ -3694,7 +3694,7 @@ body[data-mode="flashback"] .intel-peak-diff {
 .rank-row.top-1:hover {
   background:
     linear-gradient(90deg, rgba(58, 37, 19, 0.84) 0%, rgba(34, 24, 17, 0.88) 46%, rgba(22, 17, 14, 0.93) 100%),
-    url('./assets/official/rank-row-bg.png') left center / cover no-repeat;
+    url('./assets/official/rank-row-bg.webp') left center / cover no-repeat;
   background-blend-mode: multiply, normal;
 }
 
@@ -4941,7 +4941,7 @@ body[data-mode="flashback"] .row-quick-btn.is-active {
   background-color: #dfd5c4;
   background-image:
     linear-gradient(90deg, rgba(229, 220, 204, 0.84) 0%, rgba(217, 206, 188, 0.8) 55%, rgba(207, 194, 174, 0.86) 100%),
-    url('./assets/official/ranking-bg.png');
+    url('./assets/official/ranking-bg.webp');
   background-size: 100% 100%, cover;
   background-position: center;
   color: #1d1612;
@@ -4954,7 +4954,7 @@ body[data-mode="flashback"] .row-quick-btn.is-active {
   background-color: #d3c7b3;
   background-image:
     linear-gradient(90deg, rgba(213, 201, 181, 0.88) 0%, rgba(204, 191, 170, 0.84) 55%, rgba(196, 181, 158, 0.9) 100%),
-    url('./assets/official/ranking-bg.png');
+    url('./assets/official/ranking-bg.webp');
 }
 
 .rating-ladder-row:hover {
@@ -4970,7 +4970,7 @@ body[data-mode="flashback"] .row-quick-btn.is-active {
 .rating-ladder-row.is-mythic {
   background-image:
     linear-gradient(90deg, rgba(244, 227, 194, 0.92) 0%, rgba(232, 207, 162, 0.88) 60%, rgba(224, 188, 134, 0.92) 100%),
-    url('./assets/official/ranking-bg.png');
+    url('./assets/official/ranking-bg.webp');
   border-color: rgba(178, 114, 42, 0.65);
   box-shadow: 0 4px 16px rgba(229, 186, 115, 0.24), inset 4px 0 0 #b85b22;
 }
@@ -5508,7 +5508,7 @@ body[data-mode="flashback"] .modal-box {
   background-image:
     radial-gradient(circle at 86% 16%, rgba(178, 51, 38, 0.16), transparent 46%),
     linear-gradient(145deg, rgba(244, 236, 223, 0.9) 0%, rgba(226, 213, 193, 0.88) 54%, rgba(210, 193, 169, 0.92) 100%),
-    url('./assets/official/content-bg.png');
+    url('./assets/official/content-bg.webp');
   background-size: auto, auto, cover;
   background-position: center;
   color: #1e1611;
@@ -7602,6 +7602,24 @@ body[data-mode="flashback"] .compare-side-card {
   }
   body[data-mode="flashback"] .topbar {
     background: rgba(15, 16, 24, 0.98);
+  }
+
+  /* Skip decorative bitmap textures on mobile GPUs */
+  .action-cta-btn {
+    background-image: linear-gradient(135deg, rgba(223, 105, 49, 0.94) 0%, rgba(178, 51, 38, 0.98) 100%);
+  }
+  .masthead::after,
+  body[data-mode="flashback"] .masthead::after {
+    background-image: none;
+  }
+  .rank-row.top-1,
+  .rank-row.top-1:hover {
+    background: linear-gradient(90deg, rgba(46, 30, 16, 0.94) 0%, rgba(29, 21, 15, 0.96) 52%, rgba(19, 15, 13, 0.98) 100%);
+  }
+  .rating-ladder-row,
+  .rating-ladder-row:nth-child(even),
+  .rating-ladder-row.is-mythic {
+    background-image: none;
   }
 
   .topbar-inner {
