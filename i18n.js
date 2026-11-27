@@ -434,7 +434,7 @@ export const DICTS = {
     fieldPlayerName: 'Timekeeper Name',
     fieldRelatedUrl: 'Bilibili / YouTube Video Link (optional)',
     fieldRelatedUrlPlaceholder: 'https://www.youtube.com/... or https://www.bilibili.com/...',
-    fieldContact: 'Contact / Discord / UID (optional)',
+    fieldContact: 'Email (optional)',
     fieldProof: 'Result Screenshot (PNG/JPG/WebP, ≤ 5 MB · larger images auto-compressed)',
     fieldProofHint: 'Used strictly for moderator verification; never published publicly.',
     fieldRes10Check: 'All squad members are Resonance Lv. 10 (R10)',

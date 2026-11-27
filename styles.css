@@ -5468,6 +5468,8 @@ body[data-mode="flashback"] .modal-box {
 }
 
 .moderation-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+.modal-close + .moderation-tabs,
+.moderation-tabs.modal-top-tabs { padding-right: 46px; }
 
 .review-card {
   border: 1px solid var(--line-warm);

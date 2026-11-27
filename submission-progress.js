@@ -98,14 +98,14 @@ function compareOfflineRows(a, b) {
 
 export function contactFieldHtml(lang = resolveLang()) {
   const en = checkEn(lang);
-  const label = en ? 'Contact (Optional)' : '联系方式（选填）';
-  const placeholder = en ? 'e.g. Discord handle or email' : '例如：QQ 123456789 或邮箱';
+  const label = en ? 'Email (Optional)' : '联系方式（选填）';
+  const placeholder = en ? 'e.g. yourname@example.com' : '例如：QQ 123456789 或邮箱';
   const hint = en
-    ? 'Only visible to moderators if clarification is needed.'
+    ? 'Used by moderators to contact you via email if clarification is needed. Never shown publicly.'
     : '若成绩有疑问，方便管理员联系你。联系方式仅审核管理员可见。';
   return `<div class="field">
   <label for="submissionContact">${escapeHtml(label)}</label>
-  <input id="submissionContact" name="contact" maxlength="120"
+  <input id="submissionContact" name="contact" maxlength="120" inputmode="${en ? 'email' : 'text'}"
     placeholder="${escapeHtml(placeholder)}" aria-describedby="submissionContactHint">
   <span class="field-hint" id="submissionContactHint">${escapeHtml(hint)}</span>
 </div>`;
@@ -231,7 +231,7 @@ export function mountSubmissionProgress(host, {
         subtitleOnline: 'Track moderation progress for your current submitter identity. Guest submissions are stored per browser.',
         subtitleOffline: 'Offline preview mode — showing submissions archived locally in this browser.',
         noIdentityTitle: 'No submissions available to view',
-        noIdentityBody: 'Submit a score first, then return here to check its review status.',
+        noIdentityBody: 'Submit a score first, then return here to track review status and moderator notes.',
         filterAriaLabel: 'Filter by review status',
         refresh: 'Refresh ↻',
         clearOffline: 'Clear Local Submissions',
@@ -253,7 +253,7 @@ export function mountSubmissionProgress(host, {
         subtitleOnline: '查看当前投稿身份的审核进度。使用昵称投稿后，请在原浏览器查看。',
         subtitleOffline: '当前为离线预览模式，正在展示本浏览器中保存的本地存档投稿。',
         noIdentityTitle: '当前没有可查询的投稿',
-        noIdentityBody: '提交成绩后，可以回到这里查看审核结果。',
+        noIdentityBody: '提交成绩后，可以回到这里查看审核进度与管理员回复。',
         filterAriaLabel: '筛选审核状态',
         refresh: '刷新 ↻',
         clearOffline: '清空本地测试投稿',

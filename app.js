@@ -1,3 +1,4 @@
+import supabaseVendor from './vendor/supabase.umd.js';
 import {
   cleanStageDisplayName,
   formatBossCount,
@@ -216,6 +217,10 @@ async function prepareProofForUpload(file, lang = getLang()) {
 
 const OFFLINE_SUBMISSIONS_KEY = 'r1999-offline-submissions-v1';
 const DEFAULT_MODE = location.pathname.toLowerCase().includes('flashback') ? 'flashback' : 'mane';
+
+function isOfflineSandboxMode() {
+  return window.LEADERBOARD_CONFIG?.offlineFirst !== false;
+}
 
 const state = {
   mode: DEFAULT_MODE,     // 'mane' | 'flashback'
@@ -646,8 +651,8 @@ function hydrateFromOfflineSnapshot() {
   state.fbArchives = cloneSnapshotList(snap.fbArchives);
 
   syncActiveSelectionsAfterLoad();
-  state.dataSource = 'offline';
-  state.connected = true;
+  state.dataSource = isOfflineSandboxMode() ? 'offline' : 'disconnected';
+  state.connected = isOfflineSandboxMode();
   state.loading = false;
   state.errorNotice = '';
 }
@@ -1414,18 +1419,50 @@ function decodeImageFile(blob) {
 }
 
 async function checked(promise) {
-  const { data, error } = await promise;
-  if (error) throw error;
+  const res = await promise;
+  const { data, error, status } = res || {};
+  if (error) {
+    if (status && !error.status) {
+      try { error.status = status; } catch {}
+    }
+    throw error;
+  }
   return data;
+}
+
+function isTransientSupabaseError(err) {
+  const status = Number(err?.status ?? err?.statusCode ?? 0);
+  if (status >= 400 && status < 500 && status !== 429 && status !== 408) return false;
+  const code = String(err?.code || '');
+  if (code && (/^(22|23|42)/.test(code) || code === 'PGRST116' || code === 'PGRST301')) return false;
+  if (status >= 500 || status === 429 || status === 408 || status === 0) return true;
+  const msg = String(err?.message || '');
+  return /fetch|network|timeout|500|502|503|504|temporarily|gateway/i.test(msg);
+}
+
+async function retryTransient(fn, retries = 2, delayMs = 450) {
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastErr = err;
+      if (attempt >= retries || !isTransientSupabaseError(err)) throw err;
+      await new Promise((r) => setTimeout(r, delayMs * (attempt + 1)));
+    }
+  }
+  throw lastErr;
 }
 
 async function loadPages(table, orderKeys, select = '*', applyFilters = null) {
   const rows = [];
   for (let from = 0; ; from += 500) {
-    let q = sb.from(table).select(select);
-    if (applyFilters) q = applyFilters(q);
-    for (const k of orderKeys) q = q.order(k);
-    const page = await checked(q.range(from, from + 499));
+    const page = await retryTransient(() => {
+      let q = sb.from(table).select(select);
+      if (applyFilters) q = applyFilters(q);
+      for (const k of orderKeys) q = q.order(k);
+      return checked(q.range(from, from + 499));
+    });
     rows.push(...(page || []));
     if (!page || page.length < 500) return rows;
   }
@@ -1630,8 +1667,30 @@ async function ensureSupabaseClient() {
   if (!cfg?.supabaseUrl || !cfg?.supabaseAnonKey) {
     throw new Error(L('Missing Supabase configuration in config.js.', '缺少 config.js 后端配置。'));
   }
-  const dynamicImport = new Function('u', 'return import(u)');
-  const { createClient } = await dynamicImport('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm');
+  let createClient = supabaseVendor?.createClient || supabaseVendor?.default?.createClient || globalThis.supabase?.createClient;
+  if (typeof createClient !== 'function') {
+    const cdnFallbacks = [
+      'https://fastly.jsdelivr.net/npm/@supabase/supabase-js@2/+esm',
+      'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm',
+      'https://esm.sh/@supabase/supabase-js@2'
+    ];
+    const dynamicImport = new Function('u', 'return import(u)');
+    let lastImportErr;
+    for (const cdnUrl of cdnFallbacks) {
+      try {
+        const mod = await dynamicImport(cdnUrl);
+        if (typeof mod?.createClient === 'function') {
+          createClient = mod.createClient;
+          break;
+        }
+      } catch (err) {
+        lastImportErr = err;
+      }
+    }
+    if (typeof createClient !== 'function') {
+      throw lastImportErr || new Error(L('Failed to initialize Supabase client.', '初始化数据库连接失败。'));
+    }
+  }
   sb = createClient(cfg.supabaseUrl, cfg.supabaseAnonKey);
   if (!authBound) {
     authBound = true;
@@ -1653,12 +1712,18 @@ async function syncLiveArchive({ silent = false } = {}) {
       toast(t('offlineSyncOk'));
     }
   } catch (err) {
-    console.warn('Live sync failed, continuing with offline snapshot:', err);
+    console.warn('Live sync failed:', err);
     if (!state.maneMaps.length) hydrateFromOfflineSnapshot();
-    state.dataSource = 'offline';
-    state.connected = true;
+    if (isOfflineSandboxMode()) {
+      state.dataSource = 'offline';
+      state.connected = true;
+      state.errorNotice = '';
+    } else {
+      state.dataSource = 'disconnected';
+      state.connected = false;
+      state.errorNotice = t('offlineSyncFail');
+    }
     state.loading = false;
-    state.errorNotice = '';
     if (!silent) toast(t('offlineSyncFail'));
   } finally {
     state.syncingLive = false;
@@ -1666,8 +1731,38 @@ async function syncLiveArchive({ silent = false } = {}) {
   }
 }
 
+async function loadBoardBundle(board) {
+  if (board === 'mane') {
+    const [maneMaps, maneData] = await Promise.all([
+      retryTransient(() => checked(sb.from('mane_maps').select('id,name,section,edition,position,opens_at,active').eq('active', true))),
+      fetchPublicBoardData('mane')
+    ]);
+    state.maneMaps = (maneMaps || []).sort((a, b) =>
+      String(b.edition).localeCompare(String(a.edition), 'en', { numeric: true }) ||
+      (a.position - b.position) ||
+      String(a.name).localeCompare(String(b.name), 'zh-CN')
+    );
+    Object.assign(state, maneData);
+    return;
+  }
+
+  const [fbVersions, fbStages, flashbackData, fbArchives] = await Promise.all([
+    retryTransient(() => checked(sb.from('versions').select('id,code,label,created_at'))),
+    retryTransient(() => checked(sb.from('stages').select('id,version_id,stage_no,name,challenge_id'))),
+    fetchPublicBoardData('flashback'),
+    retryTransient(() => checked(sb.from('historical_records').select('id,stage_id,group_code,display_order,carry_names,lineup_label,credited_player')))
+  ]);
+  state.fbVersions = (fbVersions || []).sort((a, b) =>
+    String(b.code).localeCompare(String(a.code), 'en', { numeric: true }) ||
+    (Date.parse(b.created_at) - Date.parse(a.created_at))
+  );
+  state.fbStages = fbStages || [];
+  state.fbArchives = fbArchives || [];
+  Object.assign(state, flashbackData);
+}
+
 async function loadAllData({ keepOfflineOnFail = false } = {}) {
-  if (state.dataSource === 'offline' && !sb) {
+  if (isOfflineSandboxMode() && state.dataSource === 'offline' && !sb) {
     hydrateFromOfflineSnapshot();
     render();
     return;
@@ -1678,52 +1773,39 @@ async function loadAllData({ keepOfflineOnFail = false } = {}) {
   state.loading = true;
   renderChrome();
   try {
-    const [
-      maneMaps,
-      maneData,
-      fbVersions,
-      fbStages,
-      flashbackData,
-      fbArchives
-    ] = await Promise.all([
-      checked(sb.from('mane_maps').select('id,name,section,edition,position,opens_at,active').eq('active', true)),
-      fetchPublicBoardData('mane'),
-      checked(sb.from('versions').select('id,code,label,created_at')),
-      checked(sb.from('stages').select('id,version_id,stage_no,name,challenge_id')),
-      fetchPublicBoardData('flashback'),
-      checked(sb.from('historical_records').select('id,stage_id,group_code,display_order,carry_names,lineup_label,credited_player'))
-    ]);
-
-    state.maneMaps = (maneMaps || []).sort((a, b) =>
-      String(b.edition).localeCompare(String(a.edition), 'en', { numeric: true }) ||
-      (a.position - b.position) ||
-      String(a.name).localeCompare(String(b.name), 'zh-CN')
-    );
-    Object.assign(state, maneData, flashbackData);
-
-    state.fbVersions = (fbVersions || []).sort((a, b) =>
-      String(b.code).localeCompare(String(a.code), 'en', { numeric: true }) ||
-      (Date.parse(b.created_at) - Date.parse(a.created_at))
-    );
-    state.fbStages = fbStages || [];
-    state.fbArchives = fbArchives || [];
+    const primaryBoard = state.mode === 'flashback' ? 'flashback' : 'mane';
+    const secondaryBoard = primaryBoard === 'mane' ? 'flashback' : 'mane';
+    await loadBoardBundle(primaryBoard);
 
     syncActiveSelectionsAfterLoad();
     state.dataSource = 'live';
     state.connected = true;
     state.errorNotice = '';
+    state.loading = false;
+    render();
+
+    try {
+      await loadBoardBundle(secondaryBoard);
+      syncActiveSelectionsAfterLoad();
+      render();
+    } catch (secondaryErr) {
+      reviewedBoards.add(secondaryBoard);
+      console.warn(`Secondary board (${secondaryBoard}) sync failed, keeping primary live:`, secondaryErr);
+    }
   } catch (err) {
     coveredBoards.forEach((board) => { reviewedBoards.add(board); });
     console.error(err);
-    if (keepOfflineOnFail) {
-      if (!state.maneMaps.length) hydrateFromOfflineSnapshot();
+    if (!state.maneMaps.length) hydrateFromOfflineSnapshot();
+    if (isOfflineSandboxMode() && keepOfflineOnFail) {
       state.dataSource = 'offline';
       state.connected = true;
       state.errorNotice = '';
       throw err;
     }
+    state.dataSource = 'disconnected';
     state.connected = false;
     state.errorNotice = t('offlineSyncFail');
+    if (keepOfflineOnFail) throw err;
   } finally {
     state.loading = false;
     render();
@@ -2145,25 +2227,26 @@ function renderChrome() {
 
   const badge = $('#connectionBadge');
   const connText = $('#connectionText');
+  const isOfflineSandbox = isOfflineSandboxMode() && state.dataSource === 'offline';
+  const isDisconnected = !isOfflineSandbox && !state.connected && !state.syncingLive && !state.loading;
   if (badge && connText) {
-    const isOffline = state.dataSource === 'offline';
-    badge.classList.toggle('is-offline-archive', isOffline && !state.syncingLive);
-    badge.classList.toggle('online', !isOffline && state.connected && !state.syncingLive);
-    badge.classList.toggle('offline', !state.connected && !state.loading && !state.syncingLive);
+    badge.classList.toggle('is-offline-archive', isOfflineSandbox && !state.syncingLive);
+    badge.classList.toggle('online', !isOfflineSandbox && state.connected && !state.syncingLive);
+    badge.classList.toggle('offline', isDisconnected);
     if (state.syncingLive || state.loading) {
       connText.textContent = t('statusSyncing', {}, lang);
-    } else if (isOffline) {
+    } else if (isOfflineSandbox) {
       connText.textContent = L(`Offline Archive · v${issue.version}`, `离线档案 · v${issue.version}`, lang);
     } else if (state.connected) {
       connText.textContent = t('statusLive', {}, lang);
     } else {
-      connText.textContent = t('statusDisconnected', {}, lang);
+      connText.textContent = L('Connection Lost · Retry', '实时连接中断 · 请重试', lang);
     }
   }
 
   const syncBtn = $('#syncLiveBtn');
   if (syncBtn) {
-    syncBtn.hidden = state.dataSource === 'live';
+    syncBtn.hidden = !(isOfflineSandbox || isDisconnected);
     syncBtn.disabled = state.syncingLive;
     syncBtn.textContent = state.syncingLive ? t('statusSyncing', {}, lang) : `${t('btnSyncLive', {}, lang)} ↻`;
   }
@@ -3485,17 +3568,19 @@ function openInvestigatorDossier(playerName) {
 let maneDailyLoadSeq = 0;
 
 async function loadManeDailyRows({ date, division, mapIds }) {
-  if (state.dataSource === 'offline' || !sb) {
+  if ((isOfflineSandboxMode() && state.dataSource === 'offline') || !sb) {
     return filterOfflineDailyRows(state.maneDailyScores, { date, division, mapIds });
   }
   const [start, end] = beijingDayRange(date, getLang());
   const rows = [];
   for (let offset = 0; ; offset += 500) {
-    let query = sb.from('mane_daily_scores').select('id,map_id,division,display_name,carry,team,score,approved_at,related_url')
-      .gte('approved_at', start).lt('approved_at', end);
-    if (division) query = query.eq('division', division);
-    if (mapIds.length) query = query.in('map_id', mapIds);
-    const page = await checked(query.order('approved_at', { ascending: false }).order('id').range(offset, offset + 499));
+    const page = await retryTransient(() => {
+      let query = sb.from('mane_daily_scores').select('id,map_id,division,display_name,carry,team,score,approved_at,related_url')
+        .gte('approved_at', start).lt('approved_at', end);
+      if (division) query = query.eq('division', division);
+      if (mapIds.length) query = query.in('map_id', mapIds);
+      return checked(query.order('approved_at', { ascending: false }).order('id').range(offset, offset + 499));
+    });
     rows.push(...page);
     if (page.length < 500) return rows;
   }
@@ -3504,7 +3589,7 @@ async function loadManeDailyRows({ date, division, mapIds }) {
 function getEffectiveDailyDate() {
   const { date } = state.maneDaily;
   if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) return date;
-  if (state.dataSource === 'offline') {
+  if (isOfflineSandboxMode() && state.dataSource === 'offline') {
     return latestOfflineDailyDate(state.maneDailyScores);
   }
   return todayInBeijing();
@@ -3518,7 +3603,7 @@ function renderManeDaily() {
   const selectedDate = getEffectiveDailyDate();
   const divLabels = divisionLabelsMap(lang);
   const mapOptions = state.maneMaps.map((m) => [m.id, `${m.edition} · ${displayBossName(m.name, lang)}`]);
-  const offlineExportBtn = state.dataSource === 'offline'
+  const offlineExportBtn = (isOfflineSandboxMode() && state.dataSource === 'offline')
     ? `<button type="button" class="paper-btn btn-export-offline" data-action="export-offline-excel">${esc(t('btnExportExcel', {}, lang))}</button>`
     : '';
 
@@ -3549,7 +3634,7 @@ function renderManeDaily() {
     <div class="board-header">
       <div class="board-title-stack">
         <h2>${esc(t('dailyTitle', {}, lang))}</h2>
-        <p class="board-subtitle">${esc(t('dailySubtitle', {}, lang))}${state.dataSource === 'offline' ? ` · ${esc(t('dailyOfflineHint', {}, lang))}` : ''}</p>
+        <p class="board-subtitle">${esc(t('dailySubtitle', {}, lang))}${(isOfflineSandboxMode() && state.dataSource === 'offline') ? ` · ${esc(t('dailyOfflineHint', {}, lang))}` : ''}</p>
       </div>
       <div class="board-header-right">
         ${offlineExportBtn}
@@ -4090,7 +4175,7 @@ function renderManeTotals(latestEdition, sectionMaps = []) {
   const totalMapsCount = sectionMaps.length;
   const rows = rankManeCarryTotals(state.maneTotals, state.maneSection, editionKey, state.maneDivision, null, lang);
   const teamJoiner = isEn(lang) ? ', ' : '、';
-  const offlineExportBtn = state.dataSource === 'offline'
+  const offlineExportBtn = (isOfflineSandboxMode() && state.dataSource === 'offline')
     ? `<button type="button" class="paper-btn btn-export-offline" data-action="export-offline-excel">${esc(t('btnExportExcel', {}, lang))}</button>`
     : '';
 
@@ -5914,7 +5999,7 @@ function openManeSubmitModal() {
   if (draft) restoreModalBuildFromDraft(draft);
   else resetModalBuildState();
 
-  const isOffline = state.dataSource === 'offline';
+  const isOffline = isOfflineSandboxMode() && state.dataSource === 'offline';
   const initialMapId = (draft?.map_id && maps.some((m) => m.id === draft.map_id)) ? draft.map_id : state.maneMapId;
   const initialDiv = (draft?.division && DIVISION_KEYS.includes(draft.division)) ? draft.division : state.maneDivision;
   const initialNick = draft?.display_name || nick;
@@ -5985,7 +6070,7 @@ async function handleManeSubmit(form) {
     }
   }
 
-  if (state.dataSource === 'offline') {
+  if (isOfflineSandboxMode() && state.dataSource === 'offline') {
     const nowIso = new Date().toISOString();
     const localId = `local-${uid()}`;
     const entry = {
@@ -6031,6 +6116,7 @@ async function handleManeSubmit(form) {
   }
 
   if (!hasFile || !prepared) throw new Error(t('errProofRequired', {}, lang));
+  await ensureSupabaseClient();
 
   const session = state.session || (await checked(sb.auth.signInAnonymously())).session;
   if (!session) throw new Error(L('Could not start submission session. Please retry.', '建立投稿会话失败，请重试。', lang));
@@ -6214,7 +6300,7 @@ function bindFlashbackScreenshot(form) {
 function openFbSubmitModal() {
   const lang = getLang();
   if (!state.connected || !state.fbStages.length || startingGuest) return;
-  const isOffline = state.dataSource === 'offline';
+  const isOffline = isOfflineSandboxMode() && state.dataSource === 'offline';
 
   if (!isOffline && !state.user) {
     openModal(`
@@ -6342,7 +6428,7 @@ async function handleFbSubmit(form) {
     }
   }
 
-  if (state.dataSource === 'offline') {
+  if (isOfflineSandboxMode() && state.dataSource === 'offline') {
     const nowIso = new Date().toISOString();
     const localId = `local-${uid()}`;
     const stageObj = state.fbStages.find((s) => s.id === stageId);
@@ -6395,6 +6481,7 @@ async function handleFbSubmit(form) {
   }
 
   if (!hasFile || !prepared) throw new Error(t('errProofRequired', {}, lang));
+  await ensureSupabaseClient();
 
   const conflicts = await checked(sb.rpc('flashback_existing_lineup', {
     p_stage_id: stageId,
@@ -6470,20 +6557,44 @@ async function exportOfflineExcel() {
 }
 
 /* ==================== My Submissions & Account / Moderation ==================== */
-function openMySubmissions(mode = state.mode) {
+async function openMySubmissions(mode = state.mode) {
   const lang = getLang();
   const flashback = mode === 'flashback';
-  const isOffline = state.dataSource === 'offline';
+  const isOffline = isOfflineSandboxMode() && state.dataSource === 'offline';
   const localStore = isOffline ? loadOfflineSubmissions() : null;
   const offlineRows = isOffline ? (flashback ? localStore.flashback : localStore.mane) : null;
+  const footerNote = isOffline
+    ? t('mySubOffline', {}, lang)
+    : L(
+        'Guest submissions are linked to this browser session — check back here for review status and moderator notes.',
+        '使用昵称投稿后，请在原浏览器查看审核进度与管理员回复。',
+        lang
+      );
 
-  openModal(`<div class="moderation-tabs" role="group" aria-label="${esc(t('modeSwitcherAria', {}, lang))}">
+  openModal(`<div class="moderation-tabs modal-top-tabs" role="group" aria-label="${esc(t('modeSwitcherAria', {}, lang))}">
     <button class="outline-btn ${flashback ? '' : 'selected'}" type="button" data-progress-board="mane">${esc(t('modeMane', {}, lang))}</button>
     <button class="outline-btn ${flashback ? 'selected' : ''}" type="button" data-progress-board="flashback">${esc(t('modeFlashback', {}, lang))}</button>
-  </div><section id="progressPanel"></section><p class="field-hint">${esc(isOffline ? t('mySubOffline', {}, lang) : L('Guest submissions are linked to this browser session.', '使用昵称投稿后，请在原浏览器查看记录。', lang))}</p>`, true);
+  </div><section id="progressPanel"></section><p class="field-hint">${esc(footerNote)}</p>`, true);
 
-  mountSubmissionProgress($('#progressPanel'), {
-    client: isOffline ? null : sb,
+  const host = $('#progressPanel');
+  if (!host) return;
+
+  let activeClient = isOffline ? null : sb;
+  if (!isOffline && !activeClient) {
+    host.innerHTML = `<div class="section-header"><div><h2>${esc(t('mySubTitle', {}, lang))}</h2><p class="section-subtitle">${esc(t('statusSyncing', {}, lang))}</p></div></div><p class="empty-note">${esc(t('emptyTitleLoading', {}, lang))}</p>`;
+    try {
+      activeClient = await ensureSupabaseClient();
+      await syncAuth();
+    } catch (err) {
+      if (!host.isConnected) return;
+      host.innerHTML = `<div class="section-header"><div><h2>${esc(t('mySubTitle', {}, lang))}</h2></div></div><div class="empty-state"><h3>${esc(L('Unable to reach live server', '暂时无法连接实时服务器', lang))}</h3><p>${esc(err?.message || t('offlineSyncFail', {}, lang))}</p><div class="form-actions"><button type="button" class="outline-btn" data-progress-board="${esc(mode)}">${esc(L('Retry ↻', '重试 ↻', lang))}</button></div></div>`;
+      return;
+    }
+    if (!host.isConnected) return;
+  }
+
+  mountSubmissionProgress(host, {
+    client: activeClient,
     ownerId: isOffline ? null : state.user?.id,
     table: flashback ? 'submissions' : 'mane_entries',
     columns: flashback ? 'stage_id,group_code,carry_name,rounds,team,resonance_ten' : 'map_id,division,carry,score,team',
@@ -7654,24 +7765,26 @@ document.addEventListener('click', async (ev) => {
       return;
     }
     if (action === 'my-submissions' || btn.dataset.progressBoard) {
-      openMySubmissions(btn.dataset.progressBoard || state.mode);
+      await openMySubmissions(btn.dataset.progressBoard || state.mode);
       return;
     }
     if (action === 'refresh') {
-      if (state.dataSource === 'offline') {
+      if (isOfflineSandboxMode() && state.dataSource === 'offline') {
         hydrateFromOfflineSnapshot();
         render();
         toast(t('toastRefreshed'));
       } else {
-        await loadAllData({ keepOfflineOnFail: true });
+        await ensureSupabaseClient();
+        await loadAllData({ keepOfflineOnFail: isOfflineSandboxMode() });
         if (state.connected) toast(t('toastRefreshed'));
       }
       return;
     }
     if (action === 'refresh-mane-daily') {
-      if (state.dataSource === 'offline') {
+      if (isOfflineSandboxMode() && state.dataSource === 'offline') {
         hydrateFromOfflineSnapshot();
-      } else if (sb) {
+      } else {
+        await ensureSupabaseClient();
         state.maneScores = await loadPages('mane_leaderboard', ['id']);
       }
       render();
@@ -8161,10 +8274,15 @@ async function bootstrap() {
   initLang();
   readHash();
   hydrateFromOfflineSnapshot();
+  const cfg = window.LEADERBOARD_CONFIG;
+  const useLive = !isOfflineSandboxMode() && Boolean(cfg?.supabaseUrl && cfg?.supabaseAnonKey);
+  if (useLive) {
+    state.dataSource = 'live';
+    state.syncingLive = true;
+  }
   render();
 
-  const cfg = window.LEADERBOARD_CONFIG;
-  if (cfg?.offlineFirst === false && cfg?.supabaseUrl && cfg?.supabaseAnonKey) {
+  if (useLive) {
     await syncLiveArchive({ silent: true });
   }
 }
